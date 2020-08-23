@@ -298,8 +298,7 @@ cleaning_work_home_social_transit_clinical <- cleaning_work_home_social_transit 
          co_asthma = 0, #TODO
          co_cancer_hx = 0, #TODO
          comorbidity_n = co_asthma + co_cancer_hx, #TODO #NEED TO ADD OTHER COMORBIDITIES 
-         cancer = if_else(css_pre_existing_cond_ids_160 == 1, 1, 0, 
-                          missing = 0))
+         cancer = 0 #TODO)
   
 response_clean <- cleaning_work_home_social_transit_clinical
 
