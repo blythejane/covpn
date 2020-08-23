@@ -39,6 +39,14 @@ or_work_unsafe_masks <- 2.0
 #SOCIAL
 or_indoor_gathering <- 5.0
 
+# Weights for total cumulative exposure risk score 
+alpha_exposure <- 0
+beta_home <- .2
+beta_work <- .3
+beta_community <- .4
+beta_transit <- .1
+beta_recovered <- 0
+
 ```
 
 __Date generated:__ `r format(Sys.time(),'%d %B, %Y')` 
@@ -68,22 +76,15 @@ library(Hmisc)
 ## Study Objective
 
 
-
-```{r database connection, include = FALSE}
-
-ore.ls()
-```
-
-
 ```{r}
-response <- ore.pull(SURVEY_RESPONSES_PIVOT_MV)
+response_raw <- ore.pull(SURVEY_RESPONSES_PIVOT_MV)
 
 question <- ore.pull(QUESTION_VALUES)
 ```
 
 
 ```{r}
-names(response) <- tolower(names(response))
+names(response_raw) <- tolower(names(response_raw))
 
 names(question) <- tolower(names(question))
 
@@ -132,30 +133,34 @@ MakeDummyVariables <- function(df, cols) {
 }
 
 # clean up data
-response_raw <- MakeDummyVariables(response, ids_variable_names)
+response_dummy <- MakeDummyVariables(response_raw, ids_variable_names)
 ```
 
 
 
 ```{r}
 
-response_clean <- response_raw %>% 
-  mutate(freq_work = mapvalues(ws_wkpl_freq_id, 
-                               # note lots missing freq of work
-                               from=c(181,201,202,221), 
-                               to=c(0, 1, 3, 5)),
-         #WORK
-         freq_work = ifelse(is.na(freq_work), 0, freq_work),
-         freq_work = dplyr::replace_na(freq_work, 0),
-         freq_work_increase = mapvalues(ws_wkpl_freq_change_est_id, 
+cleaning_work <- response_dummy %>% 
+  mutate(susceptible = if_else(crd_rna_test_result == "Positive", 0,
+                               if_else(crd_anti_test_result == "Positive", 
+                                       0, 1, missing = 1), missing = 1)) %>% 
+  #WORK
+  mutate(freq_work = if_else(ws_wkpl_freq_id == 221, 5,
+                            if_else(ws_wkpl_freq_id == 202, 3,
+                                   if_else(ws_wkpl_freq_id == 181, 1, 0, 
+                                           missing = 0), missing = 0), missing = 0),
+         any_work = ifelse(!is.na(freq_work), 1 , 0),
+         freq_work_increase = as.numeric(mapvalues(ws_wkpl_freq_change_est_id, 
                                         from=c(241,242,243,261,262,263,264),
-                                        to=c(1,3,4,5,0,0,0)),
+                                        to=c(1,3,4,5,0,0,0))),
          n_work_interactions = NA,
          wfh_only = NA,
          work_unsafe_distance = if_else(ws_wkpl_scl_dis_meas_id == 266, 1, 0, missing = 0),
-         work_unsafe_masks = if_else(ws_wkpl_scl_dis_meas_id == 282, 1, 0, missing = 0),
-         #HOME
-         risky_home_setting = ifelse(ls_dwellings_ids_143 == 1 | 
+         work_unsafe_masks = if_else(ws_wkpl_scl_dis_meas_id == 282, 1, 0, missing = 0))
+         
+cleaning_work_home <- cleaning_work %>% 
+  #HOME
+  mutate(risky_home_setting = ifelse(ls_dwellings_ids_143 == 1 | 
                                        ls_dwellings_ids_144 == 1 |
                                        ls_dwellings_ids_145 == 1 | 
                                        ls_dwellings_ids_146 == 1 | 
@@ -180,22 +185,31 @@ response_clean <- response_raw %>%
                                     ls_cohab_jobs_ids_47 == 1 |
                                     ls_cohab_jobs_ids_623 == 1,
                                     1, 0),
-         freq_visitors = mapvalues(ci_home_visitor_freq_id, 
+         freq_visitors = as.numeric(mapvalues(ci_home_visitor_freq_id, 
                                    from=c(48,49,361,362,363,364),
-                                   to=c(0,0,2,1,0,0)),
-         #SOCIAL
-         social_gathering = ifelse (ci_gatherings_last_2w_id == 341, 1, 0),
-         n_social_intxn = NA,
-         n_gathering = mapvalues(ci_gatherings_people_id, 
-                                 from=c(343,344,345,346),
-                                 to=c(0,1,2,3)),
-         indoor_gathering = ifelse(any(ci_gatherings_location_id == c('347', '601')), 1, 0),
-         #TRANSIT
-         travel_plane = as.numeric(ws_work_transportation_ids_290),
+                                   to=c(0,0,2,1,0,0))))
+         
+cleaning_work_home_social_transit <- cleaning_work_home
+  #SOCIAL
+  mutate(social_gathering = if_else(ci_gatherings_last_2w_id == 341, 1, 0, missing = 0),
+         n_social_intxn = if_else(ci_interactions_dy == "More than 50 people", 4,
+                                  if_else(ci_interactions_dy == "Between 31 and 50 people", 3,
+                                          if_else(ci_interactions_dy == "Between 11 and 30 people", 2,
+                                                  if_else(ci_interactions_dy == "Between 1 and 10 people", 1, 0, 
+                                                          missing = 0), missing = 0), missing = 0), missing = 0),
+         n_gathering = if_else(ci_gatherings_people_id == 346, 3, 
+                               if_else(ci_gatherings_people_id == 345, 2, 
+                                       if_else(ci_gatherings_people_id == 344, 1, 0,
+                                               missing = 0), missing = 0), missing = 0),
+         indoor_gathering = ifelse(any(ci_gatherings_location_id == c('347', '601')), 1, 0)) %>% 
+  #TRANSIT
+  mutate(travel_plane = as.numeric(ws_work_transportation_ids_290),
          travel_bus = as.numeric(ws_work_transportation_ids_287),
-         travel_train = as.numeric(ws_work_transportation_ids_288),
-         #CLINICAL
-         age_18 = ifelse(md_age < 40, 1, 0),
+         travel_train = as.numeric(ws_work_transportation_ids_288))
+  
+cleaning_work_home_social_transit_clinical <- cleaning_work_home_social_transit
+  #CLINICAL
+  mutate(age_18 = ifelse(md_age < 40, 1, 0),
          age_40 = ifelse(md_age <50 & md_age >= 40, 1, 0),
          age_50 = ifelse(md_age <60 & md_age >= 50, 1, 0),
          age_60 = ifelse(md_age <70 & md_age >= 60, 1, 0),
@@ -209,22 +223,71 @@ response_clean <- response_raw %>%
          comorbidity = NA)
   
 
+response_clean <- cleaning_work_home_social_transit_clinical
+
+```
+
+```{r}
+
 exposures <- response_clean %>% 
-  select(people_id, 
-         freq_work, freq_work_increase, wfh_only, n_work_interactions,
+  select(people_id, susceptible,
+         any_work, freq_work, freq_work_increase, wfh_only, n_work_interactions,
          risky_home_setting, high_partner_risk, 
+         n_home_young, n_home_middle, n_home_older,
          home_schoolreturn, outside_childcare, 
          freq_visitors,
          social_gathering, n_social_intxn, n_gathering, indoor_gathering,
          travel_bus, travel_train, travel_plane,
-         md_gender,
+         md_gender, md_age,
          age_18, age_40, age_50, age_60, age_70, age_80, 
-         bmi_overweight, bmi_obese)
+         bmi_overweight, bmi_obese) %>% 
+  mutate(full_home_score  = (or_risky_home^risky_home_setting) *
+           (n_home_young*(or_school_childcare^home_schoolreturn) +
+           (n_home_middle + n_home_older)*(or_partner_job^high_partner_risk) +
+           freq_visitors),
+         #cap the score at 15 and standardize to between 0 and 1
+         score_home = if_else(full_home_score >= 15, 15, full_home_score)/15,
+         score_community = (social_gathering*n_gathering*indoor_gathering + n_social_intxn)/8, 
+         full_work_score = freq_work + freq_work_increase, 
+         score_work = if_else(full_work_score >= 10, 10, full_work_score, missing = 0)/10,
+         score_transit = ifelse(travel_bus + travel_plane + travel_train > 0, 1, 0),
+         score_cumulative_exposure = alpha_exposure + 
+           beta_home*score_home + 
+           beta_work*score_work +
+           beta_community*score_community +
+           beta_transit*score_transit)
+  
+exposure_summary <- exposures %>% 
+  select(people_id, 
+         score_home,
+         score_community,
+         score_work,
+         score_transit,
+         score_cumulative_exposure)
 
 
+ggplot(exposures, aes(score_home)) +
+  geom_density(bw = 0.05, fill = "blue", alpha = .5) +
+  xlab('Home exposure score') +
+  ylab('Density of people in registry') +
+  theme_bw()
+
+ggplot(exposures, aes(score_community)) +
+  geom_density(bw = 0.05, fill = "blue", alpha = .5) +
+  xlab('Community exposure score') +
+  ylab('Density of people in registry') +
+  theme_bw()
+
+ggplot(exposures, aes(score_transit)) +
+  geom_histogram(fill = "blue", alpha = .5) +
+  xlab('Transit exposure score') +
+  ylab('Number of people in registry') +
+  theme_bw()
+
+```
 
 
-
+```{r}
 ######### TRANSIT EXPOSURE ##########
 
 
