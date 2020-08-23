@@ -30,12 +30,10 @@ or_work_unsafe_distance <- 2.0
 or_work_unsafe_masks <- 2.0
 
 # Weights for total cumulative exposure risk score 
-alpha_exposure <- 0
 beta_home <- .2
 beta_work <- .3
 beta_community <- .4
 beta_transit <- .1
-beta_recovered <- 0
 
 #CLINICAL RISK
 p_clinical_age50 <- 0.7 
@@ -58,7 +56,6 @@ __Date generated:__ `r format(Sys.time(), '%B %d, %Y')`
 __By:__ Blythe Adamson, blythejane@gmail.com 
 
 __Collaborators:__ James Kublin, Neil Abernathy, Abigail Orlando
-
 
 <br>
 
@@ -126,6 +123,13 @@ Other member of household has risky job compared to average job | `r or_partner_
 Working in high risk job compared to average job risk | `r or_job_risk_high`| Expert opinion 
 Working in lower risk job compared to average job risk | `r or_job_risk_low`| Expert opinion 
 Working only from home | `r or_wfh`| Expert opinion 
+
+Dimension in the exposure model | Weight (beta) | Reference
+----------------------|------------|----------------
+Home | `r beta_home` | Expert opinion
+Work | `r beta_work`| Expert opinion
+Community | `r beta_community`| Expert opinion
+Transit | `r beta_transit`| Expert opinion
 
 
 Variables in clinical model | Odds Ratio (OR)| Reference
@@ -331,7 +335,7 @@ exposures <- response_clean %>%
            (or_job_risk_low^job_risk_high), 
          score_work = if_else(full_work_score >= 10, 10, full_work_score, missing = 0)/10,
          score_transit = ifelse(travel_bus + travel_plane + travel_train > 0, 1, 0),
-         score_cumulative_exposure = round((alpha_exposure + 
+         score_cumulative_exposure = round((
            beta_home*score_home + 
            beta_work*score_work +
            beta_community*score_community +
@@ -416,6 +420,8 @@ cumulative exposure, and risk of symptoms.
 
 ### Population Characteristics
 
+[WORK ON PROGRESS]
+
 <br>
 
 ## New Vaccine Trial Enpoint Risk Score
@@ -440,7 +446,7 @@ ggplot(score_summary, aes(score_endpoint, risk_score_cover_h)) +
   ylab("Cover Score for Hospitalization") + 
   geom_vline(xintercept = 50) + geom_hline(yintercept = 50) +
   theme_bw() +
-  scale_color_gradient(name = "Community exposure probability", 
+  scale_color_gradient(name = "Community exposure", 
                        low = "yellow", high = "red", na.value = NA)
   
 ```
@@ -455,7 +461,7 @@ ggplot(score_summary, aes(score_endpoint, risk_score_cover_h)) +
 ```
 
 
-```{r}
+```{r, include = FALSE}
 response_predictions %>% 
   dplyr::group_by(sr_status) %>% 
   dplyr::summarise(mean_endpoint_score = mean(score_endpoint)) 
@@ -464,11 +470,13 @@ response_predictions %>%
   dplyr::group_by(sr_status) %>% 
   dplyr::summarise(n = n())
 ```
+### Cumulative Exposure
 
-
-### Exposure scores
-
-### Distribution of exposure dimentions
+The cumulative exposure score measures the expected quantity of potentially infectious 
+exposures in the next three months using the dimensions of home, community, work, and transit. 
+The probability of having a meaningful exposure in each dimension is dependent on 
+the number of unique contacts, intensity of contact (i.e., proximity and duration), and 
+frequency of contacting. 
 
 ```{r}
 score_summary_long <- gather(data = score_summary, key = score, value = value, 
@@ -483,14 +491,27 @@ ggplot(score_summary_long %>%
   ylab('Number of people in registry') +
   theme_bw()
 ```
-##### __Figure.__ Histograms of exposure dimension scores
+
+##### __Figure.__ Histograms of community, home, work, and transit score that contribute to the cumulative exposure score
 
 <br>
 
-## Cumulative Exposure Score
+The probability of a meaningful infectious exposure at home, community, work, and transit in
+the following three months is combined in the following way: 
 
-Combined level of COVID-19 exposure at home, community, work, and transit over
-the following three months. 
+_cumulative_exposure = beta_home*score_home + beta_work*score_work + beta_community*score_community + beta_transit*score_transit_
+
+where the relative weights of each exposure setting (beta coefficients) are defined in Table 1 and the scores for each setting are defined as [WORK IN PROGRESS]:
+
+_score_home = _
+
+_score_community = _
+
+_score_work = _
+
+_score_transit = _
+
+<br>
 
 ```{r}
 ggplot(exposures, aes(score_cumulative_exposure)) +
@@ -499,6 +520,9 @@ ggplot(exposures, aes(score_cumulative_exposure)) +
   ylab('Number of people in registry') +
   theme_bw()
 ```
+
+##### __Figure.__ Distribution of cumulative exposure score
+
 
 <br>
 
@@ -520,10 +544,26 @@ ggplot(score_summary, aes(score_cumulative_exposure, risk_score_cover_h)) +
 
 <br>
 
-### Cover score vs new clinical risk score
+### Clinical risk of COVID symptoms
 
-The probability of showing at least mild symptoms if infected (clinical risk score * 100) versus
-the Cover score H representing risk of hospitalization if infected
+The clinical risk score reflects the probability of showing relative risk of showing mild-moderate COVID symptoms if 
+infected in the next 3 months compared to an average person who is age 50-59 years, 
+non-hispanic, not Black, normal weight, with no comorbidities and no history of cancer. 
+This relative risk, or clinical risk score, is calculated as:
+
+`p_clinical = logit(symptoms|infected) = exp(alpha_clinical + beta_age18 * age18 +`
+`beta_age40 * age_40 + beta_age60 * age60 + beta_age70 * age_70 + beta_age80 * age80 +`
+`beta_race_black * race_black + beta_hispanic * hispanic +`
+`beta_bmi_overweight * bmi_overweight + beta_bmi_obese * bmi_obese +`
+`beta_comorbidities_n * comorbidities_n + beta_cancer * cancer)`
+
+where each beta coefficient is the natural log of the corresponding odds ratios 
+for each variable provided in Table 1. 
+
+The clinical risk score reflects the relative likelihood of showing least mild 
+symptoms if infected (clinical risk score = p_clincal * 100). Below the new clincical risk 
+score is compared to
+the Cover score H representing risk of hospitalization if infected. 
 
 ```{r}
 ggplot(score_summary, aes(rr_clinical*100, risk_score_cover_h)) +
@@ -539,7 +579,7 @@ ggplot(score_summary, aes(rr_clinical*100, risk_score_cover_h)) +
   
 ```
 
-##### __Figure.__ New cumulative exposure score vs Cover score H
+##### __Figure.__ New score for risk of showing mild-moderate symptoms if infected ("clinical risk score") vs Cover score H
 
 <br>
 
