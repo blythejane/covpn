@@ -1,0 +1,304 @@
+---
+title: "CoVPN Screening Registry Analysis"
+output:
+  word_document: default
+  html_document:
+    theme: yeti
+    highlight: tango
+    toc: no
+    toc_float: no
+  pdf_document: default
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8,
+                      fig.height = 5,
+                      warning = FALSE,
+                      message = FALSE,
+                      echo = FALSE)
+
+#TRANSIT
+or_travel_car <- 0.01
+or_travel_carpool <- 1.0
+or_travel_share <- 1.0
+or_travel_bus <- 3.0
+or_travel_train <- 3.0
+or_travel_walk <- 0.01
+or_travel_plane <- 5.0
+
+# HOME
+or_school_childcare <- 3.0
+or_partner_job <- 2.0
+or_risky_home <- 3.0
+
+#WORKD
+or_wfh <- 0.01
+or_work_unsafe_distance <- 2.0
+or_work_unsafe_masks <- 2.0
+
+#SOCIAL
+or_indoor_gathering <- 5.0
+
+```
+
+__Date generated:__ `r format(Sys.time(),'%d %B, %Y')` 
+
+__Owner:__ Blythe Adamson, blythejane@gmail.com 
+
+
+<br>
+
+```{r setup, include=FALSE}
+library(ORE)
+library(knitr)
+library(reticulate)
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(kableExtra)
+library(lubridate)
+library(readr)
+library(scales)
+library(stringr)
+library(survminer)
+library(Hmisc)
+```
+
+## Study Objective
+
+
+
+```{r database connection, include = FALSE}
+
+ore.ls()
+```
+
+
+```{r}
+response <- ore.pull(SURVEY_RESPONSES_PIVOT_MV)
+
+question <- ore.pull(QUESTION_VALUES)
+```
+
+
+```{r}
+names(response) <- tolower(names(response))
+
+names(question) <- tolower(names(question))
+
+
+ids_variable_names <- c('md_ethnicity_ids', 'occ_jobs_ids', 'ws_work_transportation_ids',
+          'ls_dwellings_ids', 'ls_cohab_jobs_ids', 'css_current_symptoms_ids',
+          'css_pre_existing_cond_ids')
+
+MakeDummyNames <- function(v, prefix = '') {
+  s <- sort(unique(v))
+  d <- outer(v, s, function(v, s) 1L * (v == s))
+  colnames(d) <- paste0(prefix, s)
+  d
+}
+
+MakeDummyVariables <- function(df, cols) {
+  
+  for (col in cols) {
+    
+    lst <- strsplit(as.character(df[[col]]), split = "\\:")
+    
+    k <- lengths(lst)
+    
+    FlatColumn <- unlist(lst, use.names = FALSE)
+    
+    df2 <- data.frame(survey_response_id = rep.int(df$survey_response_id, k),
+                      value = FlatColumn)
+    
+    # bind the dummies to the original dataframe
+    binded <- cbind(df2, MakeDummyNames(df2$value, prefix = paste(col, "_", sep="")))
+    
+    temp <- binded[-2] %>%
+      group_by(survey_response_id) %>%
+      summarise_each(funs(sum))
+    
+    merged <- left_join(df, temp, by = c("survey_response_id" = "survey_response_id"))
+    
+    index_new_col <- (ncol(df) + 1):ncol(merged)
+    
+    merged[, index_new_col][is.na(merged[, index_new_col])] <- 0
+    
+    df <- merged
+  }
+  
+  return(df)
+}
+
+# clean up data
+response_raw <- MakeDummyVariables(response, ids_variable_names)
+```
+
+
+
+```{r}
+
+response_clean <- response_raw %>% 
+  mutate(freq_work = mapvalues(ws_wkpl_freq_id, 
+                               # note lots missing freq of work
+                               from=c(181,201,202,221), 
+                               to=c(0, 1, 3, 5)),
+         #WORK
+         freq_work = ifelse(is.na(freq_work), 0, freq_work),
+         freq_work = dplyr::replace_na(freq_work, 0),
+         freq_work_increase = mapvalues(ws_wkpl_freq_change_est_id, 
+                                        from=c(241,242,243,261,262,263,264),
+                                        to=c(1,3,4,5,0,0,0)),
+         n_work_interactions = NA,
+         wfh_only = NA,
+         work_unsafe_distance = if_else(ws_wkpl_scl_dis_meas_id == 266, 1, 0, missing = 0),
+         work_unsafe_masks = if_else(ws_wkpl_scl_dis_meas_id == 282, 1, 0, missing = 0),
+         #HOME
+         risky_home_setting = ifelse(ls_dwellings_ids_143 == 1 | 
+                                       ls_dwellings_ids_144 == 1 |
+                                       ls_dwellings_ids_145 == 1 | 
+                                       ls_dwellings_ids_146 == 1 | 
+                                       ls_dwellings_ids_148 == 1 | 
+                                       ls_dwellings_ids_149 == 1 | 
+                                       ls_dwellings_ids_150 == 1 | 
+                                       ls_dwellings_ids_143 == 1,
+                                     1, 0),
+         n_home_young = ls_cohab_under_18,
+         n_home_middle = ls_cohab_btw_18_64,
+         n_home_older = ls_cohab_over_64,
+         home_schoolreturn = if_else(ls_cohab_exp_rtn_sch_id == 381, 1, 0, missing = 0),
+         outside_childcare = ls_cohab_in_sch_or_cc, 
+         high_partner_risk = ifelse(ls_cohab_jobs_ids_317 == 1 |
+                                    ls_cohab_jobs_ids_160 == 1 |
+                                    ls_cohab_jobs_ids_158 == 1 |
+                                    ls_cohab_jobs_ids_303 == 1 |
+                                    ls_cohab_jobs_ids_302 == 1 |
+                                    ls_cohab_jobs_ids_326 == 1 |
+                                    ls_cohab_jobs_ids_159 == 1 |
+                                    ls_cohab_jobs_ids_301 == 1 |
+                                    ls_cohab_jobs_ids_47 == 1 |
+                                    ls_cohab_jobs_ids_623 == 1,
+                                    1, 0),
+         freq_visitors = mapvalues(ci_home_visitor_freq_id, 
+                                   from=c(48,49,361,362,363,364),
+                                   to=c(0,0,2,1,0,0)),
+         #SOCIAL
+         social_gathering = ifelse (ci_gatherings_last_2w_id == 341, 1, 0),
+         n_social_intxn = NA,
+         n_gathering = mapvalues(ci_gatherings_people_id, 
+                                 from=c(343,344,345,346),
+                                 to=c(0,1,2,3)),
+         indoor_gathering = ifelse(any(ci_gatherings_location_id == c('347', '601')), 1, 0),
+         #TRANSIT
+         travel_plane = as.numeric(ws_work_transportation_ids_290),
+         travel_bus = as.numeric(ws_work_transportation_ids_287),
+         travel_train = as.numeric(ws_work_transportation_ids_288),
+         #CLINICAL
+         age_18 = ifelse(md_age < 40, 1, 0),
+         age_40 = ifelse(md_age <50 & md_age >= 40, 1, 0),
+         age_50 = ifelse(md_age <60 & md_age >= 50, 1, 0),
+         age_60 = ifelse(md_age <70 & md_age >= 60, 1, 0),
+         age_70 = ifelse(md_age <80 & md_age >= 70, 1, 0),
+         age_80 = ifelse(md_age >= 80, 1, 0),
+         kg = md_weight*0.453592,
+         meters = (as.numeric(md_height_ft)*12 + as.numeric(md_height_in))*0.0254,
+         bmi = kg/(meters^2),
+         bmi_overweight = ifelse(bmi >= 25 & bmi <30, 1, 0),
+         bmi_obese = ifelse(bmi >= 30, 1, 0),
+         comorbidity = NA)
+  
+
+exposures <- response_clean %>% 
+  select(people_id, 
+         freq_work, freq_work_increase, wfh_only, n_work_interactions,
+         risky_home_setting, high_partner_risk, 
+         home_schoolreturn, outside_childcare, 
+         freq_visitors,
+         social_gathering, n_social_intxn, n_gathering, indoor_gathering,
+         travel_bus, travel_train, travel_plane,
+         md_gender,
+         age_18, age_40, age_50, age_60, age_70, age_80, 
+         bmi_overweight, bmi_obese)
+
+
+
+
+
+######### TRANSIT EXPOSURE ##########
+
+
+######### HOME EXPOSURE ##########
+gen_home_score <- function(df) {
+  
+  a = (as.numeric(df["LS_COHAB_UNDER_18"])*or_school_childcare)^(max(as.numeric(df["LS_COHAB_EXP_RTN_SCH_ID_CLEAN"]), as.numeric(df["LS_COHAB_IN_SCH_OR_CC_CLEAN"])))
+  b = (as.numeric(df["LS_COHAB_BTW_18_64"])+as.numeric(df["LS_COHAB_OVER_64"]))*(or_partner_job^high_partner_risk)
+  c = as.numeric(df["CI_HOME_VISITOR_FREQ_ID_CLEAN"]) 
+  fin <- (a+b+c)*or_risky_home^risk_home_setting
+  return(fin)
+  
+}
+
+home_scores <- apply(responses_w_dummies_w_transit_score, 1, gen_home_score)
+responses_w_dummies_w_transit_score_w_home_score <- cbind(responses_w_dummies_w_transit_score, home_scores)
+
+# plotting
+home_no_plot <- hist(home_scores, plot=FALSE)
+count(responses_w_dummies_w_transit_score_w_home_score, "home_scores")
+
+
+######### WORK EXPOSURE ##########
+
+gen_work_score <- function(df) {
+  # sum all non-WFH methods of transit
+  n_transit_methods <- sum(as.numeric(df["WS_WORK_TRANSPORTATION_IDS_285"]),
+                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_285"]),
+                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_286"]),
+                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_287"]),
+                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_288"]),
+                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_289"]),
+                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_290"]))
+  
+  wfh_only <- ifelse ((n_transit_methods=0 & (as.numeric(df["WS_WORK_TRANSPORTATION_IDS_53"]) == 1)), 1, 0)
+  
+  (as.numeric(df["WS_WKPL_FREQ_ID_CLEAN"]) + as.numeric(df["WS_WKPL_FREQ_CHANGE_EST_ID_CLEAN"])) *
+    or_work_unsafe_distance^(as.numeric(df["WS_WKPL_SCL_DIS_MEAS_ID_CLEAN"])) *
+    or_work_unsafe_masks^(as.numeric(df["WS_WKPL_PPE_USAGE_ID_CLEAN"])) *
+    or_wfh^(wfh_only)
+}
+
+work_score <- apply(responses_w_dummies_w_transit_score_w_home_score, 1, gen_work_score)
+responses_w_dummies_w_transit_score_w_home_score_w_home_score <- cbind(responses_w_dummies_w_transit_score_w_home_score, work_score)
+# for plotting
+count(responses_w_dummies_w_transit_score_w_home_score_w_home_score, "work_score")
+
+######### COMMUNITY EXPOSURE ##########
+gen_community_score <- function(df) {
+  comm_score <- as.numeric(df["CI_GATHERINGS_LAST_2W_ID_CLEAN"]) *
+    as.numeric(df["CI_GATHERINGS_PEOPLE_ID_CLEAN"]) * 
+    or_indoor_gathering^(as.numeric(df["CI_GATHERINGS_LOCATION_ID_CLEAN"]))
+  return(comm_score)
+}
+
+community_score <- apply(responses_w_dummies_w_transit_score_w_home_score_w_home_score, 1, gen_community_score)
+responses_w_dummies_w_transit_score_w_home_score_w_home_score_w_comm_score <- 
+  cbind(responses_w_dummies_w_transit_score_w_home_score_w_home_score, community_score)
+# for plotting
+count(responses_w_dummies_w_transit_score_w_home_score_w_home_score_w_comm_score, "community_score")
+
+```
+
+
+
+##### __Figure.__ Social interactions vs risk of bad outcome if infected with COVID
+```{r}
+ggplot(response, aes(risk_score_cover_h, ci_interactions_dy)) +
+  geom_point() +
+  xlab("Risk of hospitalization after infection (Cover H Score)") +
+  ylab("Interactions per day outside of work") +
+  theme_bw()
+```
+
+
+
+
