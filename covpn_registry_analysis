@@ -17,27 +17,17 @@ knitr::opts_chunk$set(fig.width = 8,
                       message = FALSE,
                       echo = FALSE)
 
-#TRANSIT
-or_travel_car <- 0.01
-or_travel_carpool <- 1.0
-or_travel_share <- 1.0
-or_travel_bus <- 3.0
-or_travel_train <- 3.0
-or_travel_walk <- 0.01
-or_travel_plane <- 5.0
-
 # HOME
-or_school_childcare <- 3.0
-or_partner_job <- 2.0
 or_risky_home <- 3.0
+or_school_childcare <- 3.0
+or_partner_job <- 1.5
 
-#WORKD
+#WORK
+or_job_risk_high <- 2.0
+or_job_risk_low <- .05
 or_wfh <- 0.01
 or_work_unsafe_distance <- 2.0
 or_work_unsafe_masks <- 2.0
-
-#SOCIAL
-or_indoor_gathering <- 5.0
 
 # Weights for total cumulative exposure risk score 
 alpha_exposure <- 0
@@ -47,11 +37,25 @@ beta_community <- .4
 beta_transit <- .1
 beta_recovered <- 0
 
+#CLINICAL RISK
+p_clinical_age50 <- 0.7 
+or_age18 <- 0.8
+or_age40 <- 0.9
+or_age60 <- 1.1
+or_age70 <- 2
+or_age80 <- 3
+or_race_black <- 5
+or_hispanic <- 5
+or_bmi_overweight <- 1.5
+or_bmi_obese <- 2
+or_comorbidity_n <- 1.6 #Source: Cover risk score
+or_cancer <- 4 #source: cover risk score
+
 ```
 
-__Date generated:__ `r format(Sys.time(),'%d %B, %Y')` 
+__Date generated:__ `r format(Sys.time(), '%B %d, %Y')` 
 
-__Owner:__ Blythe Adamson, blythejane@gmail.com 
+__By:__ Blythe Adamson, blythejane@gmail.com 
 
 
 <br>
@@ -73,17 +77,83 @@ library(survminer)
 library(Hmisc)
 ```
 
-## Study Objective
+# Background
+The mission of the COVID-19 Prevention Network (CoVPN) is to conduct Phase 3 
+efficacy trials for COVID-19 vaccines and monoclonal antibodies. The CoVPN 
+is working to develop and conduct studies to ensure rapid and thorough evaluation 
+of US government-sponsored COVID-19 vaccines for the prevention of COVID-19 
+disease. The purpose of the CoVPN Screening Registry is to create a list of 
+potential volunteers who want to take part in current or future COVID-19 
+prevention clinical trials. You must be 18 years or older to participate. 
+Participation involves completing a short online survey that includes some 
+personal questions. Participation is voluntary.
+
+A major and critical need for the field is the ability to provide some level of 
+confidence in predicting individual risk for infection and disease based on a 
+survey of demographic detail, e.g. CoVPN registry. If clinical trial sites can 
+easily identify and enroll patients who are most likely to become an endpoint, 
+the pre-specified count of endpoints needed for trial completion will be 
+reached sooner and sufficient evidence will be available sooner for the FDA 
+to evaluate vaccine efficacy. 
+
+__Research Question:__ _What is the likelihood that an individual in the CoVPN volunteer screening registry will become infected with SARS-CoV-2 and develop symptomatic COVID disease in the next 3 months?_
+
+<br>
+
+# Methods
+
+### Study population
+The population of interest is people in the United States who have expressed willingness to participate in COVID-19 vaccine clinical trials and who completed an online Volunteer Screening Form and are included in the CoVPN Screening Registry. 
+
+### Study design
+This project aims to design an endpoint risk model to be applied to the CoVPN Screening Registry using an evidence synthesis of published studies and publicly available data sources. 
+
+### Data provenance
+The main data source is the CoVPN Vaccine Trial Screening Registry powered by Oracle APEX.
+The online survey form with all questions is avaiable 
+[here](https://coronaviruspreventionnetwork.org/clinical-study-volunteer/).
 
 
-```{r}
+###### __Table 1.__ Key model inputs
+
+Variable | Odds Ratio (OR) for exposure model | Reference
+----------------------|------------|----------------
+Risky household setting compared to average setting | `r or_risky_home` | Expert opinion 
+Child in household returning to school or childcare in 2020 | `r or_school_childcare`| Expert opinion 
+Other member of household has risky job compared to average job | `r or_partner_job`| Expert opinion 
+Working in high risk job compared to average job risk | `r or_job_risk_high`| Expert opinion 
+Working in lower risk job compared to average job risk`r or_job_risk_low`| Expert opinion 
+Working only from home | `r or_wfh`| Expert opinion 
+
+
+Variables | Odds Ratio (OR) for clinical model | Reference
+----------------------|------------|----------------
+Age 18-<40 | `r or_age18` | Davies et al
+Age 40-<50 | `r or_age40` | Davies et al
+Age 50-<60 | 1.0 (Reference) | Davies et al
+Age 60-<70 | `r or_age60` | Davies et al
+Age 70-<80 | `r or_age70` | Davies et al
+Age 40-<50 | `r or_age80` | Davies et al
+Black race | `or_race_black`  | Expert opinion
+Hispanic or LatinX | `r or_hispanic`| Expert opinion
+BMI overweight | `r or_bmi_overweight`| Expert opinion
+BMI obese | `r or_bmi_obese` | Expert opinion
+No. of comorbidities | `r or_comorbidity_n`  Cover risk score
+History of recent cancer treatment | `r or_cancer` | Cover risk score
+
+<small>*Reference groups: non-black race is the reference group for race and non-Hispanic, non-LatinX is the reference group for Hispanic or LatinX, normal or underweight BMI is the reference group for BMI categories. Abbreviations: BMI, body mass index.</small>
+
+The probability of showing symptoms for an infected person age 50-59 was`r p_clinical_age50`, assuming normal weight, non-black race, non-Hispanic, no comorbidities, and no history of cancer. 
+
+
+```{r pull datasets}
 response_raw <- ore.pull(SURVEY_RESPONSES_PIVOT_MV)
 
 question <- ore.pull(QUESTION_VALUES)
 ```
 
 
-```{r}
+```{r make dummy}
 names(response_raw) <- tolower(names(response_raw))
 
 names(question) <- tolower(names(question))
@@ -137,13 +207,13 @@ response_dummy <- MakeDummyVariables(response_raw, ids_variable_names)
 ```
 
 
-
-```{r}
+```{r clean variables}
 
 cleaning_work <- response_dummy %>% 
   mutate(susceptible = if_else(crd_rna_test_result == "Positive", 0,
                                if_else(crd_anti_test_result == "Positive", 
-                                       0, 1, missing = 1), missing = 1)) %>% 
+                                       0, 1, missing = 1), missing = 1),
+         sr_guid = as.character(sr_guid)) %>% 
   #WORK
   mutate(freq_work = if_else(ws_wkpl_freq_id == 221, 5,
                             if_else(ws_wkpl_freq_id == 202, 3,
@@ -153,6 +223,9 @@ cleaning_work <- response_dummy %>%
          freq_work_increase = as.numeric(mapvalues(ws_wkpl_freq_change_est_id, 
                                         from=c(241,242,243,261,262,263,264),
                                         to=c(1,3,4,5,0,0,0))),
+         job_risk_high = 0,
+         job_risk_high = if_else(occ_jobs_ids_137 == 1, 1, 0, missing = 0),
+         job_risk_low = 0,
          n_work_interactions = NA,
          wfh_only = NA,
          work_unsafe_distance = if_else(ws_wkpl_scl_dis_meas_id == 266, 1, 0, missing = 0),
@@ -189,7 +262,7 @@ cleaning_work_home <- cleaning_work %>%
                                    from=c(48,49,361,362,363,364),
                                    to=c(0,0,2,1,0,0))))
          
-cleaning_work_home_social_transit <- cleaning_work_home
+cleaning_work_home_social_transit <- cleaning_work_home %>% 
   #SOCIAL
   mutate(social_gathering = if_else(ci_gatherings_last_2w_id == 341, 1, 0, missing = 0),
          n_social_intxn = if_else(ci_interactions_dy == "More than 50 people", 4,
@@ -207,161 +280,293 @@ cleaning_work_home_social_transit <- cleaning_work_home
          travel_bus = as.numeric(ws_work_transportation_ids_287),
          travel_train = as.numeric(ws_work_transportation_ids_288))
   
-cleaning_work_home_social_transit_clinical <- cleaning_work_home_social_transit
-  #CLINICAL
+cleaning_work_home_social_transit_clinical <- cleaning_work_home_social_transit %>% 
+  #DEMOGRAPHICS & CLINICAL
   mutate(age_18 = ifelse(md_age < 40, 1, 0),
          age_40 = ifelse(md_age <50 & md_age >= 40, 1, 0),
          age_50 = ifelse(md_age <60 & md_age >= 50, 1, 0),
          age_60 = ifelse(md_age <70 & md_age >= 60, 1, 0),
          age_70 = ifelse(md_age <80 & md_age >= 70, 1, 0),
          age_80 = ifelse(md_age >= 80, 1, 0),
+         race_black = if_else(md_ethnicity_ids_40 == 1, 1, 0, missing = 0), #TODO
+         hispanic = if_else(md_ethnicity_ids_43 == 1, 1, 0, missing = 0), #TODO
          kg = md_weight*0.453592,
          meters = (as.numeric(md_height_ft)*12 + as.numeric(md_height_in))*0.0254,
          bmi = kg/(meters^2),
          bmi_overweight = ifelse(bmi >= 25 & bmi <30, 1, 0),
          bmi_obese = ifelse(bmi >= 30, 1, 0),
-         comorbidity = NA)
+         co_asthma = 0, #TODO
+         co_cancer_hx = 0, #TODO
+         comorbidity_n = co_asthma + co_cancer_hx, #TODO #NEED TO ADD OTHER COMORBIDITIES 
+         cancer = if_else(css_pre_existing_cond_ids_160 == 1, 1, 0, 
+                          missing = 0))
   
-
 response_clean <- cleaning_work_home_social_transit_clinical
 
 ```
 
-```{r}
+```{r generate exposure scores}
 
 exposures <- response_clean %>% 
-  select(people_id, susceptible,
-         any_work, freq_work, freq_work_increase, wfh_only, n_work_interactions,
+  select(sr_guid, susceptible,
+         any_work, freq_work, freq_work_increase, 
+         job_risk_high, job_risk_low,
+         wfh_only, n_work_interactions,
          risky_home_setting, high_partner_risk, 
          n_home_young, n_home_middle, n_home_older,
          home_schoolreturn, outside_childcare, 
          freq_visitors,
          social_gathering, n_social_intxn, n_gathering, indoor_gathering,
          travel_bus, travel_train, travel_plane,
-         md_gender, md_age,
-         age_18, age_40, age_50, age_60, age_70, age_80, 
-         bmi_overweight, bmi_obese) %>% 
+         risk_score_cover_h) %>% 
   mutate(full_home_score  = (or_risky_home^risky_home_setting) *
            (n_home_young*(or_school_childcare^home_schoolreturn) +
            (n_home_middle + n_home_older)*(or_partner_job^high_partner_risk) +
            freq_visitors),
-         #cap the score at 15 and standardize to between 0 and 1
          score_home = if_else(full_home_score >= 15, 15, full_home_score)/15,
-         score_community = (social_gathering*n_gathering*indoor_gathering + n_social_intxn)/8, 
-         full_work_score = freq_work + freq_work_increase, 
+         full_score_community = ((social_gathering*n_gathering*indoor_gathering)^2 + n_social_intxn^2), 
+         score_community = if_else(full_score_community >= 10, 10, full_score_community)/10,
+         full_work_score = (freq_work + freq_work_increase)*(or_job_risk_high^job_risk_high)*
+           (or_job_risk_low^job_risk_high), 
          score_work = if_else(full_work_score >= 10, 10, full_work_score, missing = 0)/10,
          score_transit = ifelse(travel_bus + travel_plane + travel_train > 0, 1, 0),
-         score_cumulative_exposure = alpha_exposure + 
+         score_cumulative_exposure = round((alpha_exposure + 
            beta_home*score_home + 
            beta_work*score_work +
            beta_community*score_community +
-           beta_transit*score_transit)
+           beta_transit*score_transit)*100, digits = 0))
   
-exposure_summary <- exposures %>% 
-  select(people_id, 
+score_summary_part1 <- exposures %>% 
+  select(sr_guid, 
          score_home,
          score_community,
          score_work,
          score_transit,
-         score_cumulative_exposure)
+         score_cumulative_exposure, 
+         risk_score_cover_h)
+```
+
+```{r generate clinical risk}
+
+alpha_clinical <- log(p_clinical_age50/(1- p_clinical_age50))
+beta_age18 <- exp(or_age18)
+beta_age40 <- exp(or_age40)
+beta_age60 <- exp(or_age60)
+beta_age70 <- exp(or_age70)
+beta_age80 <- exp(or_age80)
+beta_race_black <- exp(or_race_black)
+beta_hispanic <- exp(or_hispanic)
+beta_bmi_overweight <- exp(or_bmi_overweight)
+beta_bmi_obese <- exp(or_bmi_obese)
+beta_comorbidity_n <- exp(or_comorbidity_n)
+beta_cancer <- exp(or_cancer)
+
+clinical <- response_clean %>% 
+  select(sr_guid,
+         md_gender, md_age,
+         age_18, age_40, age_50, age_60, age_70, age_80, 
+         bmi_overweight, bmi_obese,
+         race_black, hispanic,
+         comorbidity_n, cancer,
+         risk_score_cover_h) %>% 
+  mutate(rr_clinical = exp(alpha_clinical + beta_age18*age_18 + 
+                             beta_age40*age_40 +
+                             beta_age60*age_60 +
+                             beta_age70*age_70 +
+                             beta_age80*age_80 +
+                             beta_race_black*race_black +
+                             beta_hispanic*hispanic +
+                             beta_bmi_overweight*bmi_overweight +
+                             beta_bmi_obese*bmi_obese + 
+                             beta_comorbidity_n*comorbidity_n + 
+                             beta_cancer*cancer) /
+           (1 + exp(alpha_clinical + beta_age18*age_18 + 
+                             beta_age40*age_40 +
+                             beta_age60*age_60 +
+                             beta_age70*age_70 +
+                             beta_age80*age_80 +
+                             beta_race_black*race_black +
+                             beta_hispanic*hispanic +
+                             beta_bmi_overweight*bmi_overweight +
+                             beta_bmi_obese*bmi_obese + 
+                             beta_comorbidity_n*comorbidity_n + 
+                             beta_cancer*cancer)))
+
+score_summary <- score_summary_part1 %>% 
+  dplyr::left_join(clinical %>% 
+              select(sr_guid, rr_clinical), by = "sr_guid") %>% 
+  mutate(score_endpoint = score_cumulative_exposure * rr_clinical)
+```
+
+```{r}
+# final analysis dataf rame with all cleaned responses and model predictions
+response_predictions <- response_clean %>% 
+  left_join(score_summary, by = "sr_guid")
+```
+
+<br>
+
+# Results
+
+We developed a individual person-level cumulative endpoint risk score with four dimensions 
+(home, community, work, transit), a relative risk of showing symptoms if infected, 
+and a magic vaccine trial endpoint risk score that combines susceptibility, 
+cumulative exposure, and risk of symptoms. 
+
+### Population Characteristics
+
+[INSERT BASELINE TABLE]
 
 
-ggplot(exposures, aes(score_home)) +
-  geom_density(bw = 0.05, fill = "blue", alpha = .5) +
-  xlab('Home exposure score') +
-  ylab('Density of people in registry') +
-  theme_bw()
+<br>
 
-ggplot(exposures, aes(score_community)) +
-  geom_density(bw = 0.05, fill = "blue", alpha = .5) +
-  xlab('Community exposure score') +
-  ylab('Density of people in registry') +
-  theme_bw()
+## Vaccine Trial Enpoint Risk Score
 
-ggplot(exposures, aes(score_transit)) +
-  geom_histogram(fill = "blue", alpha = .5) +
-  xlab('Transit exposure score') +
+```{r}
+ggplot(score_summary, aes(score_endpoint, risk_score_cover_h)) +
+  geom_jitter(alpha = .3, aes(color = score_community)) +
+  xlim(0,100) +
+  ylim(0,100) +
+  xlab("Final endpoint risk score") +
+  ylab("Cover Score for Hospitalization") + 
+  geom_vline(xintercept = 50) + geom_hline(yintercept = 50) +
+  theme_bw() +
+  scale_color_gradient(name = "Community exposure probability", 
+                       low = "yellow", high = "red", na.value = NA)
+  
+```
+##### __Figure.__ Final endpoint risk score vs Cover score for hospitalizations
+
+[INSERT baseline table overall, top 25% of endpoint score, bottom 25% endpoint score]
+
+
+### Exposure scores
+
+### Distribution of exposure dimentions
+
+```{r}
+score_summary_long <- gather(data = score_summary, key = score, value = value, 
+       score_home:risk_score_cover_h) 
+
+ggplot(score_summary_long %>% 
+         filter(score == "score_home" | score == "score_community" |
+                  score == "score_work" | score == "score_transit"), aes(value, fill = score)) +
+  geom_histogram(alpha = .7, binwidth = .1) +
+  facet_wrap(~score) +
+  xlab('Score') +
   ylab('Number of people in registry') +
   theme_bw()
-
 ```
+##### __Figure.__ Histograms of exposure dimension scores
 
+<br>
+
+## Cumulative Exposure Score
+
+Combined level of COVID-19 exposure at home, community, work, and transit over
+the following three months. 
 
 ```{r}
-######### TRANSIT EXPOSURE ##########
-
-
-######### HOME EXPOSURE ##########
-gen_home_score <- function(df) {
-  
-  a = (as.numeric(df["LS_COHAB_UNDER_18"])*or_school_childcare)^(max(as.numeric(df["LS_COHAB_EXP_RTN_SCH_ID_CLEAN"]), as.numeric(df["LS_COHAB_IN_SCH_OR_CC_CLEAN"])))
-  b = (as.numeric(df["LS_COHAB_BTW_18_64"])+as.numeric(df["LS_COHAB_OVER_64"]))*(or_partner_job^high_partner_risk)
-  c = as.numeric(df["CI_HOME_VISITOR_FREQ_ID_CLEAN"]) 
-  fin <- (a+b+c)*or_risky_home^risk_home_setting
-  return(fin)
-  
-}
-
-home_scores <- apply(responses_w_dummies_w_transit_score, 1, gen_home_score)
-responses_w_dummies_w_transit_score_w_home_score <- cbind(responses_w_dummies_w_transit_score, home_scores)
-
-# plotting
-home_no_plot <- hist(home_scores, plot=FALSE)
-count(responses_w_dummies_w_transit_score_w_home_score, "home_scores")
-
-
-######### WORK EXPOSURE ##########
-
-gen_work_score <- function(df) {
-  # sum all non-WFH methods of transit
-  n_transit_methods <- sum(as.numeric(df["WS_WORK_TRANSPORTATION_IDS_285"]),
-                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_285"]),
-                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_286"]),
-                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_287"]),
-                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_288"]),
-                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_289"]),
-                           as.numeric(df["WS_WORK_TRANSPORTATION_IDS_290"]))
-  
-  wfh_only <- ifelse ((n_transit_methods=0 & (as.numeric(df["WS_WORK_TRANSPORTATION_IDS_53"]) == 1)), 1, 0)
-  
-  (as.numeric(df["WS_WKPL_FREQ_ID_CLEAN"]) + as.numeric(df["WS_WKPL_FREQ_CHANGE_EST_ID_CLEAN"])) *
-    or_work_unsafe_distance^(as.numeric(df["WS_WKPL_SCL_DIS_MEAS_ID_CLEAN"])) *
-    or_work_unsafe_masks^(as.numeric(df["WS_WKPL_PPE_USAGE_ID_CLEAN"])) *
-    or_wfh^(wfh_only)
-}
-
-work_score <- apply(responses_w_dummies_w_transit_score_w_home_score, 1, gen_work_score)
-responses_w_dummies_w_transit_score_w_home_score_w_home_score <- cbind(responses_w_dummies_w_transit_score_w_home_score, work_score)
-# for plotting
-count(responses_w_dummies_w_transit_score_w_home_score_w_home_score, "work_score")
-
-######### COMMUNITY EXPOSURE ##########
-gen_community_score <- function(df) {
-  comm_score <- as.numeric(df["CI_GATHERINGS_LAST_2W_ID_CLEAN"]) *
-    as.numeric(df["CI_GATHERINGS_PEOPLE_ID_CLEAN"]) * 
-    or_indoor_gathering^(as.numeric(df["CI_GATHERINGS_LOCATION_ID_CLEAN"]))
-  return(comm_score)
-}
-
-community_score <- apply(responses_w_dummies_w_transit_score_w_home_score_w_home_score, 1, gen_community_score)
-responses_w_dummies_w_transit_score_w_home_score_w_home_score_w_comm_score <- 
-  cbind(responses_w_dummies_w_transit_score_w_home_score_w_home_score, community_score)
-# for plotting
-count(responses_w_dummies_w_transit_score_w_home_score_w_home_score_w_comm_score, "community_score")
-
-```
-
-
-
-##### __Figure.__ Social interactions vs risk of bad outcome if infected with COVID
-```{r}
-ggplot(response, aes(risk_score_cover_h, ci_interactions_dy)) +
-  geom_point() +
-  xlab("Risk of hospitalization after infection (Cover H Score)") +
-  ylab("Interactions per day outside of work") +
+ggplot(exposures, aes(score_cumulative_exposure)) +
+  geom_histogram(fill = "black", alpha = .6, binwidth = 10) +
+  xlab('Cumulative exposure score') +
+  ylab('Number of people in registry') +
   theme_bw()
 ```
 
+<br>
+
+```{r}
+ggplot(score_summary, aes(score_cumulative_exposure, risk_score_cover_h)) +
+  geom_jitter(alpha = .3, aes(color = score_community)) +
+  xlim(0,100) +
+  ylim(0,100) +
+  xlab("Cumulative Exposure Score") +
+  ylab("Cover Score for Hospitalization") + 
+  geom_vline(xintercept = 50) + geom_hline(yintercept = 50) +
+  theme_bw() +
+  scale_color_gradient(name = "Community exposure probability", 
+                       low = "yellow", high = "red", na.value = NA)
+  
+```
+
+### Cover score vs new clinical risk score
+
+The probability of showing at least mild symptoms if infected (clinical risk score * 100) versus
+the Cover score H representing risk of hospitalization if infected
+
+```{r}
+ggplot(score_summary, aes(rr_clinical*100, risk_score_cover_h)) +
+  geom_jitter(alpha = .3, aes(color = score_community)) +
+  xlim(0,100) +
+  ylim(0,100) +
+  xlab("Clinical risk score") +
+  ylab("Cover Score for Hospitalization") + 
+  geom_vline(xintercept = 50) + geom_hline(yintercept = 50) +
+  theme_bw() +
+  scale_color_gradient(name = "Community exposure probability", 
+                       low = "yellow", high = "red", na.value = NA)
+  
+```
 
 
 
+
+##### __Figure.__ Cumulative exposure score vs Cover score for hospitalization
+
+<br>
+
+# Discussion
+
+The vaccine endpoint risk score developed here may be a useful tool to enrich the 
+population assessed for enrollment.
+
+<br>
+
+## APPENDIX
+
+<br>
+
+
+```{r}
+ggplot(score_summary, aes(score_cumulative_exposure, rr_clinical)) +
+  geom_jitter(alpha = .3, aes(color = score_community)) +
+  xlim(0,100) +
+  ylim(0,1) +
+  xlab("Cumulative exposure score") +
+  ylab("Probability of symptoms if infected") + 
+  geom_vline(xintercept = 50) + geom_hline(yintercept = .5) +
+  theme_bw() +
+  scale_color_gradient(name = "Community exposure", 
+                       low = "grey", high = "blue", na.value = NA)
+```
+
+```{r}
+ggplot(score_summary, aes(score_home, score_work)) +
+  geom_jitter(alpha = .3, aes(color = score_community)) +
+  xlim(0,1) +
+  ylim(0,1) +
+  xlab("Home exposure probability") +
+  ylab("Work exposure probability") + 
+  geom_vline(xintercept = .5) + geom_hline(yintercept = .5) +
+  theme_bw() +
+  scale_color_gradient(name = "Community exposure", 
+                       low = "grey", high = "blue", na.value = NA)
+```
+##### __Figure.__ Distribution of home exposure and work exposure dimentions of the cumulative exposure score
+
+<br>
+
+```{r}
+ggplot(score_summary, aes(score_home, score_work)) +
+  geom_jitter(alpha = .3, aes(color = score_community)) +
+  xlim(0,1) +
+  ylim(0,1) +
+  xlab("Home exposure probability") +
+  ylab("Work exposure probability") + 
+  geom_vline(xintercept = .5) + geom_hline(yintercept = .5) +
+  theme_bw() +
+  scale_color_gradient(name = "Transit exposure", 
+                       low = "grey", high = "green", na.value = NA)
+```
+##### __Figure.__ Correlation between home and work exposure
