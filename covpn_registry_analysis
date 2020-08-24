@@ -10,24 +10,25 @@ output:
   pdf_document: default
 ---
 
+__Date generated:__ `r format(Sys.time(), '%B %d, %Y')` 
+
+__By:__ Blythe Adamson, blythejane@gmail.com 
+
+__Collaborators:__ James Kublin, Neil Abernathy, Abigail Orlando
+
+<br>
+
 ```{r global_options, include=FALSE}
+
+############ GLOBAL VARIABLES ############
+
 knitr::opts_chunk$set(fig.width = 8,
                       fig.height = 5,
                       warning = FALSE,
                       message = FALSE,
                       echo = FALSE)
 
-# HOME
-or_risky_home <- 3.0
-or_school_childcare <- 3.0
-or_partner_job <- 1.5
-
-#WORK
-or_job_risk_high <- 2.0
-or_job_risk_low <- .05
-or_wfh <- 0.01
-or_work_unsafe_distance <- 2.0
-or_work_unsafe_masks <- 2.0
+options(ore.warn.order=FALSE)
 
 # Weights for total cumulative exposure risk score 
 beta_home <- .2
@@ -35,7 +36,17 @@ beta_work <- .3
 beta_community <- .4
 beta_transit <- .1
 
-#CLINICAL RISK
+# Exposure odds ratios
+or_risky_home <- 3.0
+or_school_childcare <- 3.0
+or_partner_job <- 1.5
+or_job_risk_high <- 2.0
+or_job_risk_low <- .05
+or_wfh <- 0.01
+or_work_unsafe_distance <- 2.0
+or_work_unsafe_masks <- 2.0
+
+# Clinical risk odds ratios
 p_clinical_age50 <- 0.7 
 or_age18 <- 0.8
 or_age40 <- 0.9
@@ -50,14 +61,6 @@ or_comorbidity_n <- 1.6 #Source: Cover risk score
 or_cancer <- 4 #source: cover risk score
 
 ```
-
-__Date generated:__ `r format(Sys.time(), '%B %d, %Y')` 
-
-__By:__ Blythe Adamson, blythejane@gmail.com 
-
-__Collaborators:__ James Kublin, Neil Abernathy, Abigail Orlando
-
-<br>
 
 ```{r setup, include=FALSE}
 library(ORE)
@@ -152,18 +155,19 @@ History of recent cancer treatment | `r or_cancer` | Cover risk score
 The assumed baseline probability of showing symptoms for an infected person age 50-59 was `r p_clinical_age50`, for someone with normal weight who is non-black race, non-Hispanic, has no comorbidities, and no history of cancer. 
 
 
-```{r pull datasets}
+
+```{r gather data}
 response_raw <- ore.pull(SURVEY_RESPONSES_PIVOT_MV)
 
 question <- ore.pull(QUESTION_VALUES)
-```
 
-
-```{r make dummy}
 names(response_raw) <- tolower(names(response_raw))
 
 names(question) <- tolower(names(question))
+```
 
+
+```{r functions}
 
 ids_variable_names <- c('md_ethnicity_ids', 'occ_jobs_ids', 'ws_work_transportation_ids',
           'ls_dwellings_ids', 'ls_cohab_jobs_ids', 'css_current_symptoms_ids',
@@ -179,140 +183,293 @@ MakeDummyNames <- function(v, prefix = '') {
 MakeDummyVariables <- function(df, cols) {
   
   for (col in cols) {
-    
     lst <- strsplit(as.character(df[[col]]), split = "\\:")
-    
     k <- lengths(lst)
-    
     FlatColumn <- unlist(lst, use.names = FALSE)
-    
     df2 <- data.frame(survey_response_id = rep.int(df$survey_response_id, k),
                       value = FlatColumn)
-    
     # bind the dummies to the original dataframe
     binded <- cbind(df2, MakeDummyNames(df2$value, prefix = paste(col, "_", sep="")))
-    
     temp <- binded[-2] %>%
       group_by(survey_response_id) %>%
       summarise_each(funs(sum))
-    
     merged <- left_join(df, temp, by = c("survey_response_id" = "survey_response_id"))
-    
     index_new_col <- (ncol(df) + 1):ncol(merged)
-    
     merged[, index_new_col][is.na(merged[, index_new_col])] <- 0
-    
     df <- merged
   }
   
   return(df)
 }
 
-# clean up data
-response_dummy <- MakeDummyVariables(response_raw, ids_variable_names)
+CreateBaselineTable <- function(baseline_df, variable){
+  
+  columns <- c(variable)
+  
+  baseline_df <- as.data.frame(baseline.df)
+  
+  #create formula for comparison groups
+  forumula <- as.formula(paste(columns, 
+                               paste(lookup.t, collapse = " + "),
+                               sep = " ~ "))
+  
+  # Loop through all variables to give them a label to improve formatting in the table
+  for (i in 1:length(names))
+  
+}
+
 ```
 
 
-```{r clean variables}
 
-cleaning_work <- response_dummy %>% 
-  mutate(susceptible = if_else(crd_rna_test_result == "Positive", 0,
-                               if_else(crd_anti_test_result == "Positive", 
-                                       0, 1, missing = 1), missing = 1),
-         sr_guid = as.character(sr_guid)) %>% 
-  #WORK
-  mutate(freq_work = if_else(ws_wkpl_freq_id == 221, 5,
-                            if_else(ws_wkpl_freq_id == 202, 3,
-                                   if_else(ws_wkpl_freq_id == 181, 1, 0, 
-                                           missing = 0), missing = 0), missing = 0),
-         any_work = ifelse(!is.na(freq_work), 1 , 0),
-         freq_work_increase = as.numeric(mapvalues(ws_wkpl_freq_change_est_id, 
-                                        from=c(241,242,243,261,262,263,264),
-                                        to=c(1,3,4,5,0,0,0))),
-         job_risk_high = 0,
-         job_risk_high = if_else(occ_jobs_ids_137 == 1, 1, 0, missing = 0),
-         job_risk_low = 0,
-         n_work_interactions = NA,
-         wfh_only = NA,
-         work_unsafe_distance = if_else(ws_wkpl_scl_dis_meas_id == 266, 1, 0, missing = 0),
-         work_unsafe_masks = if_else(ws_wkpl_scl_dis_meas_id == 282, 1, 0, missing = 0))
-         
-cleaning_work_home <- cleaning_work %>% 
-  #HOME
-  mutate(risky_home_setting = ifelse(ls_dwellings_ids_143 == 1 | 
-                                       ls_dwellings_ids_144 == 1 |
-                                       ls_dwellings_ids_145 == 1 | 
-                                       ls_dwellings_ids_146 == 1 | 
-                                       ls_dwellings_ids_148 == 1 | 
-                                       ls_dwellings_ids_149 == 1 | 
-                                       ls_dwellings_ids_150 == 1 | 
-                                       ls_dwellings_ids_143 == 1,
-                                     1, 0),
-         n_home_young = ls_cohab_under_18,
-         n_home_middle = ls_cohab_btw_18_64,
-         n_home_older = ls_cohab_over_64,
-         home_schoolreturn = if_else(ls_cohab_exp_rtn_sch_id == 381, 1, 0, missing = 0),
-         outside_childcare = ls_cohab_in_sch_or_cc, 
-         high_partner_risk = ifelse(ls_cohab_jobs_ids_317 == 1 |
-                                    ls_cohab_jobs_ids_160 == 1 |
-                                    ls_cohab_jobs_ids_158 == 1 |
-                                    ls_cohab_jobs_ids_303 == 1 |
-                                    ls_cohab_jobs_ids_302 == 1 |
-                                    ls_cohab_jobs_ids_326 == 1 |
-                                    ls_cohab_jobs_ids_159 == 1 |
-                                    ls_cohab_jobs_ids_301 == 1 |
-                                    ls_cohab_jobs_ids_47 == 1 |
-                                    ls_cohab_jobs_ids_623 == 1,
-                                    1, 0),
-         freq_visitors = as.numeric(mapvalues(ci_home_visitor_freq_id, 
-                                   from=c(48,49,361,362,363,364),
-                                   to=c(0,0,2,1,0,0))))
-         
-cleaning_work_home_social_transit <- cleaning_work_home %>% 
-  #SOCIAL
-  mutate(social_gathering = if_else(ci_gatherings_last_2w_id == 341, 1, 0, missing = 0),
-         n_social_intxn = if_else(ci_interactions_dy == "More than 50 people", 4,
-                                  if_else(ci_interactions_dy == "Between 31 and 50 people", 3,
-                                          if_else(ci_interactions_dy == "Between 11 and 30 people", 2,
-                                                  if_else(ci_interactions_dy == "Between 1 and 10 people", 1, 0, 
-                                                          missing = 0), missing = 0), missing = 0), missing = 0),
-         n_gathering = if_else(ci_gatherings_people_id == 346, 3, 
-                               if_else(ci_gatherings_people_id == 345, 2, 
-                                       if_else(ci_gatherings_people_id == 344, 1, 0,
-                                               missing = 0), missing = 0), missing = 0),
-         indoor_gathering = ifelse(any(ci_gatherings_location_id == c('347', '601')), 1, 0)) %>% 
-  #TRANSIT
-  mutate(travel_plane = as.numeric(ws_work_transportation_ids_290),
-         travel_bus = as.numeric(ws_work_transportation_ids_287),
-         travel_train = as.numeric(ws_work_transportation_ids_288))
-  
-cleaning_work_home_social_transit_clinical <- cleaning_work_home_social_transit %>% 
-  #DEMOGRAPHICS & CLINICAL
-  mutate(age_18 = ifelse(md_age < 40, 1, 0),
-         age_40 = ifelse(md_age <50 & md_age >= 40, 1, 0),
-         age_50 = ifelse(md_age <60 & md_age >= 50, 1, 0),
-         age_60 = ifelse(md_age <70 & md_age >= 60, 1, 0),
-         age_70 = ifelse(md_age <80 & md_age >= 70, 1, 0),
-         age_80 = ifelse(md_age >= 80, 1, 0),
-         race_black = if_else(md_ethnicity_ids_40 == 1, 1, 0, missing = 0), #TODO
-         hispanic = if_else(md_ethnicity_ids_43 == 1, 1, 0, missing = 0), #TODO
-         kg = md_weight*0.453592,
-         meters = (as.numeric(md_height_ft)*12 + as.numeric(md_height_in))*0.0254,
-         bmi = kg/(meters^2),
-         bmi_overweight = ifelse(bmi >= 25 & bmi <30, 1, 0),
-         bmi_obese = ifelse(bmi >= 30, 1, 0),
-         co_asthma = 0, #TODO
-         co_cancer_hx = 0, #TODO
-         comorbidity_n = co_asthma + co_cancer_hx, #TODO #NEED TO ADD OTHER COMORBIDITIES 
-         cancer = 0)  #TODO
-  
-response_clean <- cleaning_work_home_social_transit_clinical
+```{r clean and derive features}
+
+responses_clean <- MakeDummyVariables(response_raw, ids_variable_names)
+
+############ DERIVED FEATURES  ############
+
+# DERIVED FEATURE: susceptible
+check_if_susceptible <- function(x, y){
+   is_not_pos <- ifelse((x=='Positive') | (y=='Positive'), 0, 1)
+   return(ifelse(is.na(is_not_pos), 1, is_not_pos))
+}
+responses_clean$susceptible <- mapply(check_if_susceptible, responses_clean$crd_rna_test_result, responses_clean$crd_anti_test_result)
+
+# DERIVED FEATURE: freq_work
+responses_clean$freq_work <- as.numeric(mapvalues(responses_clean$ws_wkpl_freq_id, 
+                                      from=c(181,201,202,221),
+                                      to=c(0, 1, 3, 5)))
+responses_clean$freq_work[is.na(responses_clean$freq_work)] <- 0
+
+# DERIVED FEATURE: any_work
+responses_clean$any_work <- sapply(responses_clean$occ_working_id, function(x) ifelse (x == 127, 1, 0))
+responses_clean$any_work[is.na(responses_clean$any_work)] <- 0
+
+# DERIVED FEATURE: freq_work_increase
+responses_clean$freq_work_increase <- as.numeric(mapvalues(responses_clean$ws_wkpl_freq_change_est_id, 
+                                               from=c(241,242,243,261,262,263,264),
+                                               to=c(1,3,4,5,0,0,0)))
+responses_clean$freq_work_increase[is.na(responses_clean$freq_work_increase)] <- 0
+
+# DERIVED FEATURE: job_risk_high
+# 178:childcare, 161:socialservices, 139:dental, 164:factory, 163:food
+# 137:healthworker, 140:personal, 162:protective, 46:transit, 621:tourism
+responses_clean$job_risk_high <- sapply(responses_clean$occ_jobs_ids, function(x) ifelse (any(
+   x==c(178,161,139,164,163,137,140,162,46,621)), 1, 0)) 
+responses_clean$job_risk_high[is.na(responses_clean$job_risk_high)] <- 0
+
+# DERIVED FEATURE: job_low_risk
+# 174:architect, 176:art, 131:business, 179:laborer, 165:farmer, 168:grounds
+# 132:IT, 134:legal, 136:research, 130:management, 133:office, 171:warehouse
+responses_clean$job_risk_low <- sapply(responses_clean$occ_jobs_ids, function(x) ifelse (any(
+   x==c(174,176,131,179,165,168,132,134,136,130,133,171)), 1, 0)) 
+responses_clean$job_risk_low[is.na(responses_clean$job_risk_low)] <- 0
+
+# DERIVED FEATURE: n_work_interactions
+responses_clean$n_work_interactions <- as.numeric(mapvalues(responses_clean$ws_work_interactions_dy_id, 
+                                                from=c(583,584,585,586,587),
+                                                to=c(0,1,2,3,4)))
+responses_clean$n_work_interactions[is.na(responses_clean$n_work_interactions)] <- 0
+
+# DERIVED FEATURE: n_transit_methods
+gen_n_transit_methods <- function(df){
+   n_transit_methods <- sum(as.numeric(df["ws_work_transportation_ids_285"]),
+                            as.numeric(df["ws_work_transportation_ids_285"]),
+                            as.numeric(df["ws_work_transportation_ids_286"]),
+                            as.numeric(df["ws_work_transportation_ids_287"]),
+                            as.numeric(df["ws_work_transportation_ids_288"]),
+                            as.numeric(df["ws_work_transportation_ids_289"]),
+                            as.numeric(df["ws_work_transportation_ids_290"]))
+   return(n_transit_methods)
+}
+responses_clean$n_transit_methods <- apply(responses_clean, 1, gen_n_transit_methods)
+
+# DERIVED FEATURE: wfh_only
+gen_wfh_only <- function(df){
+   wfh_only <- ifelse ((df['n_transit_methods']=0 & (as.numeric(df["ws_work_transportation_ids_53"]) == 1)), 1, 0)
+   return(wfh_only)
+}
+responses_clean$wfh_only <- apply(responses_clean, 1, gen_wfh_only)
+
+# DERIVED FEATURE: work_unsafe_distance
+responses_clean$work_unsafe_distance <- sapply(responses_clean$ws_wkpl_scl_dis_meas_id, function(x) ifelse (x == 266, 1, 0))
+responses_clean$work_unsafe_distance[is.na(responses_clean$work_unsafe_distance)] <- 0
+
+# DERIVED FEATURE: work_unsafe_masks
+responses_clean$work_unsafe_masks <- sapply(responses_clean$ws_wkpl_ppe_usage_id, function(x) ifelse (x == 282, 1, 0))
+responses_clean$work_unsafe_masks[is.na(responses_clean$work_unsafe_masks)] <- 0
+
+# DERIVED FEATURE: risky_home_setting
+responses_clean$risky_home_setting <- apply(responses_clean[c('ls_dwellings_ids_143', 'ls_dwellings_ids_144', 'ls_dwellings_ids_145',
+                                                            'ls_dwellings_ids_146', 'ls_dwellings_ids_148', 'ls_dwellings_ids_149',
+                                                            'ls_dwellings_ids_150', 'ls_dwellings_ids_153')], 1, max)
+responses_clean$risky_home_setting[is.na(responses_clean$risky_home_setting)] <- 0
+
+
+# DERIVED FEATURE: n_home_young
+responses_clean$n_home_young = sapply(responses_clean$ls_cohab_under_18, function(x) ifelse(x>8, 8, x))
+responses_clean$n_home_young[is.na(responses_clean$n_home_young)] <- 0
+
+# DERIVED FEATURE: n_home_middle
+responses_clean$n_home_middle = sapply(responses_clean$ls_cohab_btw_18_64, function(x) ifelse(x>8, 8, x))
+responses_clean$n_home_middle[is.na(responses_clean$n_home_middle)] <- 0
+
+# DERIVED FEATURE: n_home_older
+responses_clean$n_home_older = sapply(responses_clean$ls_cohab_over_64, function(x) ifelse(x>8, 8, x))
+responses_clean$n_home_older[is.na(responses_clean$n_home_older)] <- 0
+
+# DERIVED FEATURE: home_schoolreturn
+responses_clean$home_schoolreturn = sapply(responses_clean$ls_cohab_exp_rtn_sch_id, function(x) if_else(x == 381, 1, 0))
+responses_clean$home_schoolreturn[is.na(responses_clean$home_schoolreturn)] <- 0
+
+# DERIVED FEATURE: outside_childcare
+responses_clean$outside_childcare = sapply(responses_clean$ls_cohab_in_sch_or_cc, function(x) ifelse(x>8, 8, x))
+responses_clean$outside_childcare[is.na(responses_clean$outside_childcare)] <- 0
+
+# DERIVED FEATURE: high_partner_risk
+responses_clean$high_partner_risk <- apply(responses_clean[c('ls_cohab_jobs_ids_317', 'ls_cohab_jobs_ids_160', 'ls_cohab_jobs_ids_158',
+                                                              'ls_cohab_jobs_ids_303', 'ls_cohab_jobs_ids_302', 'ls_cohab_jobs_ids_326',
+                                                              'ls_cohab_jobs_ids_159', 'ls_cohab_jobs_ids_301', 'ls_cohab_jobs_ids_47',
+                                                              'ls_cohab_jobs_ids_623')], 1, max)
+responses_clean$high_partner_risk[is.na(responses_clean$high_partner_risk)] <- 0
+
+# DERIVED FEATURE: freq_visitors
+responses_clean$freq_visitors = as.numeric(mapvalues(responses_clean$ci_home_visitor_freq_id, 
+                                          from=c(48,49,361,362,363,364),
+                                          to=c(0,0,2,1,0,0)))
+responses_clean$freq_visitors[is.na(responses_clean$freq_visitors)] <- 0
+
+# DERIVED FEATURE: social_gathering
+responses_clean$social_gathering = sapply(responses_clean$ci_gatherings_last_2w_id, function(x) if_else(x == 341, 1, 0))
+responses_clean$social_gathering[is.na(responses_clean$social_gathering)] <- 0
+
+# DERIVED FEATURE: n_social_intxn
+responses_clean$n_social_intxn <- as.numeric(mapvalues(responses_clean$ci_interactions_dy_id, 
+                                            from=c(588,589,590,591,592),
+                                            to=c(0,1,2,3,4)))
+responses_clean$n_social_intxn[is.na(responses_clean$n_social_intxn)] <- 0
+
+# DERIVED FEATURE: n_gathering
+responses_clean$n_gathering <- as.numeric(mapvalues(responses_clean$ci_gatherings_people_id, 
+                                                           from=c(343,344,345,346),
+                                                           to=c(0,1,2,3)))
+responses_clean$n_gathering[is.na(responses_clean$n_gathering)] <- 0
+
+# DERIVED FEATURE: indoor_gathering
+responses_clean$indoor_gathering <- sapply(responses_clean$ci_gatherings_location_id, function(x) ifelse (any(x==c('347', '601')), 1, 0))
+responses_clean$indoor_gathering[is.na(responses_clean$indoor_gathering)] <- 0
+
+# DERIVED FEATURE: travel_plane
+responses_clean$travel_plane <- responses_clean$ws_work_transportation_ids_290
+responses_clean$travel_plane[is.na(responses_clean$travel_plane)] <- 0
+   
+# DERIVED FEATURE: travel_bus
+responses_clean$travel_bus <- responses_clean$ws_work_transportation_ids_287
+responses_clean$travel_bus[is.na(responses_clean$travel_bus)] <- 0
+
+# DERIVED FEATURE: travel_train
+responses_clean$travel_train <- responses_clean$ws_work_transportation_ids_288
+responses_clean$travel_train[is.na(responses_clean$travel_train)] <- 0
+
+# DERIVED FEATURE: age_18
+responses_clean$age_18 <- sapply(responses_clean$md_age, function(x) ifelse (x<40, 1, 0))
+responses_clean$age_18[is.na(responses_clean$age_18)] <- 0
+
+# DERIVED FEATURE: age_40
+responses_clean$age_40 <- sapply(responses_clean$md_age, function(x) ifelse ((x<50 & x>= 40), 1, 0))
+responses_clean$age_40[is.na(responses_clean$age_40)] <- 0
+
+# DERIVED FEATURE: age_50
+responses_clean$age_50 <- sapply(responses_clean$md_age, function(x) ifelse ((x<60 & x>= 50), 1, 0))
+responses_clean$age_50[is.na(responses_clean$age_50)] <- 0
+
+# DERIVED FEATURE: age_60
+responses_clean$age_60 <- sapply(responses_clean$md_age, function(x) ifelse ((x<70 & x>= 60), 1, 0))
+responses_clean$age_60[is.na(responses_clean$age_60)] <- 0
+
+# DERIVED FEATURE: age_70
+responses_clean$age_70 <- sapply(responses_clean$md_age, function(x) ifelse ((x<80 & x>= 70), 1, 0))
+responses_clean$age_70[is.na(responses_clean$age_70)] <- 0
+
+# DERIVED FEATURE: age_80
+responses_clean$age_80 <- sapply(responses_clean$md_age, function(x) ifelse (x>=80, 1, 0))
+responses_clean$age_80[is.na(responses_clean$age_80)] <- 0
+
+# DERIVED FEATURE: race_black
+responses_clean$race_black <- responses_clean$md_ethnicity_ids_40
+responses_clean$race_black[is.na(responses_clean$race_black)] <- 0
+
+# DERIVED FEATURE: hispanic
+responses_clean$hispanic <- responses_clean$md_ethnicity_ids_43
+responses_clean$hispanic[is.na(responses_clean$race_black)] <- 0
+
+# DERIVED FEATURE: kg
+responses_clean$kg <- sapply(responses_clean$md_weight, function(x) x*0.453592)
+responses_clean$kg[is.na(responses_clean$kg)] <- 0
+
+# DERIVED FEATURE: meters
+gen_meters <- function(x, y){
+   return((as.numeric(x)*12 + as.numeric(y))*0.0254)
+}
+responses_clean$meters <- mapply(gen_meters, responses_clean$md_height_ft, responses_clean$md_height_in)
+responses_clean$meters[is.na(responses_clean$meters)] <- 0
+
+# DERIVED FEATURE: bmi
+gen_bmi <- function(x, y){
+   return(x/(y^2))
+}
+responses_clean$bmi <- mapply(gen_bmi, responses_clean$kg, responses_clean$meters)
+responses_clean$bmi[is.na(responses_clean$bmi)] <- 0
+
+# DERIVED FEATURE: bmi_overweight
+responses_clean$bmi_overweight <- sapply(responses_clean$bmi, function(x) ifelse(x>=25 & x<30, 1, 0))
+responses_clean$bmi_overweight[is.na(responses_clean$bmi_overweight)] <- 0
+
+# DERIVED FEATURE: bmi_obese
+responses_clean$bmi_obese <- sapply(responses_clean$bmi, function(x) ifelse(x>=30, 1, 0))
+responses_clean$bmi_obese[is.na(responses_clean$bmi_obese)] <- 0
+
+# DERIVED FEATURE: co_asthma
+responses_clean$co_asthma <- responses_clean$css_pre_existing_cond_ids_549
+responses_clean$co_asthma[is.na(responses_clean$co_asthma)] <- 0
+
+# DERIVED FEATURE: co_cancer_hx
+responses_clean$co_cancer_hx <- responses_clean$css_pre_existing_cond_ids_560
+responses_clean$co_cancer_hx[is.na(responses_clean$co_cancer_hx)] <- 0
+
+# DERIVED FEATURE: cancer
+responses_clean$cancer <- responses_clean$css_pre_existing_cond_ids_561
+responses_clean$cancer[is.na(responses_clean$cancer)] <- 0
+
+# DERIVED FEATURE: comorbidity_n
+responses_clean$comorbidity_n <- apply(responses_clean[c("css_pre_existing_cond_ids_1","css_pre_existing_cond_ids_2",
+                                                         "css_pre_existing_cond_ids_3","css_pre_existing_cond_ids_4",
+                                                         "css_pre_existing_cond_ids_547",
+                                                         "css_pre_existing_cond_ids_548","css_pre_existing_cond_ids_549",
+                                                         "css_pre_existing_cond_ids_550","css_pre_existing_cond_ids_551",
+                                                         "css_pre_existing_cond_ids_552","css_pre_existing_cond_ids_554",
+                                                         "css_pre_existing_cond_ids_555","css_pre_existing_cond_ids_556",
+                                                         "css_pre_existing_cond_ids_557","css_pre_existing_cond_ids_558",
+                                                         "css_pre_existing_cond_ids_559","css_pre_existing_cond_ids_560",
+                                                         "css_pre_existing_cond_ids_561","css_pre_existing_cond_ids_562",
+                                                         "css_pre_existing_cond_ids_563","css_pre_existing_cond_ids_564",
+                                                         "css_pre_existing_cond_ids_565","css_pre_existing_cond_ids_566",
+                                                         "css_pre_existing_cond_ids_567","css_pre_existing_cond_ids_568",
+                                                         "css_pre_existing_cond_ids_569","css_pre_existing_cond_ids_570",
+                                                         "css_pre_existing_cond_ids_81","css_pre_existing_cond_ids_82",
+                                                         "css_pre_existing_cond_ids_83")], 1, sum)
+responses_clean$comorbidity_n[is.na(responses_clean$comorbidity_n)] <- 0
+
 
 ```
+
+
 
 ```{r generate exposure scores}
 
-exposures <- response_clean %>% 
+# Define exposure score
+
+exposures <- responses_clean %>% 
   select(sr_guid, susceptible,
          any_work, freq_work, freq_work_increase, 
          job_risk_high, job_risk_low,
@@ -329,12 +486,16 @@ exposures <- response_clean %>%
            (n_home_middle + n_home_older)*(or_partner_job^high_partner_risk) +
            freq_visitors),
          score_home = if_else(full_home_score >= 15, 15, full_home_score)/15,
+         
          full_score_community = ((social_gathering*n_gathering*indoor_gathering)^2 + n_social_intxn^2), 
          score_community = if_else(full_score_community >= 10, 10, full_score_community)/10,
+         
          full_work_score = (freq_work + freq_work_increase)*(or_job_risk_high^job_risk_high)*
            (or_job_risk_low^job_risk_high), 
          score_work = if_else(full_work_score >= 10, 10, full_work_score, missing = 0)/10,
+         
          score_transit = ifelse(travel_bus + travel_plane + travel_train > 0, 1, 0),
+         
          score_cumulative_exposure = round((
            beta_home*score_home + 
            beta_work*score_work +
@@ -353,6 +514,8 @@ score_summary_part1 <- exposures %>%
 
 ```{r generate clinical risk}
 
+# Define clnical symptomatic risk score
+
 alpha_clinical <- log(p_clinical_age50/(1- p_clinical_age50))
 beta_age18 <- exp(or_age18)
 beta_age40 <- exp(or_age40)
@@ -366,7 +529,7 @@ beta_bmi_obese <- exp(or_bmi_obese)
 beta_comorbidity_n <- exp(or_comorbidity_n)
 beta_cancer <- exp(or_cancer)
 
-clinical <- response_clean %>% 
+clinical <- responses_clean %>% 
   select(sr_guid,
          md_gender, md_age,
          age_18, age_40, age_50, age_60, age_70, age_80, 
@@ -374,7 +537,7 @@ clinical <- response_clean %>%
          race_black, hispanic,
          comorbidity_n, cancer,
          risk_score_cover_h) %>% 
-  mutate(rr_clinical = exp(alpha_clinical + beta_age18*age_18 + 
+  mutate(p_clinical = exp(alpha_clinical + beta_age18*age_18 + 
                              beta_age40*age_40 +
                              beta_age60*age_60 +
                              beta_age70*age_70 +
@@ -395,17 +558,22 @@ clinical <- response_clean %>%
                              beta_bmi_overweight*bmi_overweight +
                              beta_bmi_obese*bmi_obese + 
                              beta_comorbidity_n*comorbidity_n + 
-                             beta_cancer*cancer)))
+                             beta_cancer*cancer))) %>% 
+  mutate(score_control = 100 - md_age)
 
-score_summary <- score_summary_part1 %>% 
+score_summary_part2 <- score_summary_part1 %>% 
   dplyr::left_join(clinical %>% 
-              select(sr_guid, rr_clinical), by = "sr_guid") %>% 
-  mutate(score_endpoint = score_cumulative_exposure * rr_clinical * susceptible)
+              select(sr_guid, p_clinical, score_control), by = "sr_guid") 
+
 ```
 
-```{r}
-# final analysis dataf rame with all cleaned responses and model predictions
-response_predictions <- response_clean %>% 
+```{r generate endpoint score}
+
+score_summary <- score_summary_part2 %>% 
+  mutate(score_endpoint = score_cumulative_exposure * p_clinical * susceptible)
+
+# final analysis data frame with all cleaned responses and model predictions
+response_predictions <- responses_clean %>% 
   left_join(score_summary, by = "sr_guid")
 ```
 
@@ -428,13 +596,14 @@ cumulative exposure, and risk of symptoms.
 
 The new proposed vaccine trial endpoint risk score is calculated as:
 
-__score_endpoint = susceptible * score_cumulative_exposure * relative_risk_clinical__
+__score_endpoint = susceptible * score_cumulative_exposure * p_clinical__
 
 where susceptible is defined as having no prior 
 RNA or antibody test with a "Positive" result; 
 cumulative exposure includes the additive probabilities of being exposed at 
-home, community, work, and transit; and relative risk clinical is the combined risk of experiencing COVID disease
-symptoms if infected, depending on age, race, ethnicity, BMI, and comorbidities. 
+home, community, work, and transit; and p_clinical is the expected probability 
+the invidiual would experience clinical symptoms of COVID disease
+if infected, depending on age, race, ethnicity, BMI, and comorbidities. 
 
 
 ```{r}
@@ -458,6 +627,13 @@ ggplot(score_summary, aes(score_endpoint, risk_score_cover_h)) +
 ```{r}
 #TODO
 # [INSERT table overall, top 25% of endpoint score, bottom 25% endpoint score]
+```
+
+The distribution of magic endpoint risk scores can be described using percentiles. 
+These percentiles may be considered in the future as thresholds to define levels
+of exposure risk. 
+```{r}
+quantile(score_summary$score_endpoint, c(.025, .25, .33, .5, .67, .985))
 ```
 
 
@@ -561,7 +737,7 @@ where each beta coefficient is the natural log of the corresponding odds ratios
 for each variable provided in Table 1. 
 
 The clinical risk score reflects the relative likelihood of showing least mild 
-symptoms if infected (clinical risk score = p_clincal * 100). Below the new clincical risk 
+symptoms if infected (clinical risk score = p_clinical * 100). Below the new cliniccal risk 
 score is compared to
 the Cover score H representing risk of hospitalization if infected. 
 
