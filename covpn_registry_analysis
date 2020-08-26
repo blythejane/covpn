@@ -41,6 +41,7 @@ beta_transit <- .1
 # Exposure odds ratios
 or_risky_home <- 3.0
 or_school_childcare <- 3.0
+or_caregiver <- 1.3
 or_partner_job <- 1.5
 or_job_risk_high <- 2.0
 or_job_risk_low <- 0.5
@@ -108,54 +109,69 @@ __Research Question:__ _What is the likelihood that an individual in the CoVPN v
 # Methods
 
 ### Study population
-The population of interest is people in the United States who have expressed willingness to participate in COVID-19 vaccine clinical trials and who completed an online Volunteer Screening Form and are included in the CoVPN Screening Registry. 
+The population of interest is people in the United States who have expressed 
+willingness to participate in COVID-19 vaccine clinical trials and who 
+completed an online Volunteer Screening Form and are included in the CoVPN Screening Registry. 
 
 ### Study design
-This project aims to design an endpoint risk model to be applied to the CoVPN Screening Registry using an evidence synthesis of published studies and publicly available data sources. 
+This project aims to design an endpoint risk model to be applied to the 
+CoVPN Screening Registry using an evidence synthesis of published studies 
+and publicly available data sources. 
 
 ### Data provenance
 The main data source is the CoVPN Vaccine Trial Screening Registry powered by Oracle APEX.
-The online survey form with all questions is avaiable 
-[here](https://coronaviruspreventionnetwork.org/clinical-study-volunteer/).
+The online survey form with all questions is available 
+[here](https://coronaviruspreventionnetwork.org/clinical-study-volunteer/). 
+Key model inputs from literature review and expert opinion are presented below. 
+Risk ratios in the linear exposure model modify the intensity of an exposure in 
+reference to an average of similar type. 
+The assumed baseline probability of showing symptoms for an infected person 
+age 50-59 was `r p_clinical_age50`, for someone with normal weight who is 
+non-Black race, non-Hispanic, has no comorbidities, and no history of cancer. 
 
 
 ###### __Table 1.__ Key model inputs
 
-Variables in exposure model | Odds Ratio (OR)| Reference
-----------------------|------------|----------------
-Risky household setting compared to average setting | `r or_risky_home` | Expert opinion 
-Child in household returning to school or childcare in 2020 | `r or_school_childcare`| Expert opinion 
-Other member of household has risky job compared to average job | `r or_partner_job`| Expert opinion 
-Working in high risk job compared to average job risk | `r or_job_risk_high`| Expert opinion 
-Working in lower risk job compared to average job risk | `r or_job_risk_low`| Expert opinion 
-Working only from home | `r or_wfh`| Expert opinion 
-
-Dimension in the exposure model | Weight (beta) | Reference
+Dimension of exposure | Weight | Reference
 ----------------------|------------|----------------
 Home | `r beta_home` | Expert opinion
 Work | `r beta_work`| Expert opinion
 Community | `r beta_community`| Expert opinion
 Transit | `r beta_transit`| Expert opinion
 
+<br>
 
-Variables in clinical model | Odds Ratio (OR)| Reference
+Variables in exposure model | Risk Ratio | Reference
+----------------------|------------|----------------
+Risky household setting compared to average setting | `r or_risky_home` | Expert opinion 
+Child in household returning to school or childcare in 2020 compared to a child not returning to school | `r or_school_childcare`| Expert opinion
+Caregiver | `r or_caregiver` | expert opinion
+Other member of household has risky job compared to average job | `r or_partner_job`| Expert opinion 
+Working in high risk job compared to average job risk | `r or_job_risk_high`| Expert opinion 
+Working in lower risk job compared to average job risk | `r or_job_risk_low`| Expert opinion 
+Working only from home | `r or_wfh`| Expert opinion 
+
+<br>
+
+Variables in clinical symptoms model | Risk Ratio | Reference
 ----------------------|------------|----------------
 Age 18-<40 | `r or_age18` | Davies et al
 Age 40-<50 | `r or_age40` | Davies et al
-Age 50-<60 | 1.0 (Reference) | Davies et al
+Age 50-<60 | 1.0 (Ref) | Davies et al
 Age 60-<70 | `r or_age60` | Davies et al
 Age 70-<80 | `r or_age70` | Davies et al
-Age 40-<50 | `r or_age80` | Davies et al
-Black race | `or_race_black`  | Expert opinion
+Age 80+ | `r or_age80` | Davies et al
+Black race | `r or_race_black`  | Expert opinion
 Hispanic or LatinX | `r or_hispanic`| Expert opinion
 BMI overweight | `r or_bmi_overweight`| Expert opinion
 BMI obese | `r or_bmi_obese` | Expert opinion
-No. of comorbidities | `r or_comorbidity_n`  Cover risk score
+No. of comorbidities | `r or_comorbidity_n`  | Cover risk score
 History of recent cancer treatment | `r or_cancer` | Cover risk score
 
-<small>*Reference groups: non-black race is the reference group for race and non-Hispanic, non-LatinX is the reference group for Hispanic or LatinX, normal or underweight BMI is the reference group for BMI categories. Abbreviations: BMI, body mass index.</small>
-
-The assumed baseline probability of showing symptoms for an infected person age 50-59 was `r p_clinical_age50`, for someone with normal weight who is non-black race, non-Hispanic, has no comorbidities, and no history of cancer. 
+<small>*Reference groups: non-black race is the reference group for race and 
+non-Hispanic, non-LatinX is the reference group for Hispanic or LatinX, 
+normal or underweight BMI is the reference group for BMI categories. 
+Abbreviations: BMI, body mass index.</small>
 
 
 ```{r gather data}
@@ -249,7 +265,7 @@ CreateBaselineTable <- function(baseline_df,
 
 
 
-```{r clean and derive features}
+```{r clean and derive features, cache =TRUE}
 
 responses_clean <- MakeDummyVariables(response_raw, ids_variable_names)
 
@@ -260,7 +276,9 @@ check_if_susceptible <- function(x, y){
    is_not_pos <- ifelse((x=='Positive') | (y=='Positive'), 0, 1)
    return(ifelse(is.na(is_not_pos), 1, is_not_pos))
 }
-responses_clean$susceptible <- mapply(check_if_susceptible, responses_clean$crd_rna_test_result, responses_clean$crd_anti_test_result)
+responses_clean$susceptible <- mapply(check_if_susceptible, 
+                                      responses_clean$crd_rna_test_result, 
+                                      responses_clean$crd_anti_test_result)
 
 # DERIVED FEATURE: freq_work
 responses_clean$freq_work <- as.numeric(mapvalues(responses_clean$ws_wkpl_freq_id, 
@@ -269,7 +287,8 @@ responses_clean$freq_work <- as.numeric(mapvalues(responses_clean$ws_wkpl_freq_i
 responses_clean$freq_work[is.na(responses_clean$freq_work)] <- 0
 
 # DERIVED FEATURE: any_work
-responses_clean$any_work <- sapply(responses_clean$occ_working_id, function(x) ifelse (x == 127, 1, 0))
+responses_clean$any_work <- sapply(responses_clean$occ_working_id, 
+                                   function(x) ifelse (x == 127, 1, 0))
 responses_clean$any_work[is.na(responses_clean$any_work)] <- 0
 
 # DERIVED FEATURE: freq_work_increase
@@ -281,14 +300,16 @@ responses_clean$freq_work_increase[is.na(responses_clean$freq_work_increase)] <-
 # DERIVED FEATURE: job_risk_high
 # 178:childcare, 161:socialservices, 139:dental, 164:factory, 163:food
 # 137:healthworker, 140:personal, 162:protective, 46:transit, 621:tourism
-responses_clean$job_risk_high <- sapply(responses_clean$occ_jobs_ids, function(x) ifelse (any(
+responses_clean$job_risk_high <- sapply(responses_clean$occ_jobs_ids, 
+                                        function(x) ifelse (any(
    x==c(178,161,139,164,163,137,140,162,46,621)), 1, 0)) 
 responses_clean$job_risk_high[is.na(responses_clean$job_risk_high)] <- 0
 
 # DERIVED FEATURE: job_low_risk
 # 174:architect, 176:art, 131:business, 179:laborer, 165:farmer, 168:grounds
 # 132:IT, 134:legal, 136:research, 130:management, 133:office, 171:warehouse
-responses_clean$job_risk_low <- sapply(responses_clean$occ_jobs_ids, function(x) ifelse (any(
+responses_clean$job_risk_low <- sapply(responses_clean$occ_jobs_ids, 
+                                       function(x) ifelse (any(
    x==c(174,176,131,179,165,168,132,134,136,130,133,171)), 1, 0)) 
 responses_clean$job_risk_low[is.na(responses_clean$job_risk_low)] <- 0
 
@@ -319,72 +340,109 @@ gen_wfh_only <- function(df){
 responses_clean$wfh_only <- apply(responses_clean, 1, gen_wfh_only)
 
 # DERIVED FEATURE: work_unsafe_distance
-responses_clean$work_unsafe_distance <- sapply(responses_clean$ws_wkpl_scl_dis_meas_id, function(x) ifelse (x == 266, 1, 0))
+responses_clean$work_unsafe_distance <- sapply(responses_clean$ws_wkpl_scl_dis_meas_id, 
+                                               function(x) ifelse (x == 266, 1, 0))
 responses_clean$work_unsafe_distance[is.na(responses_clean$work_unsafe_distance)] <- 0
 
 # DERIVED FEATURE: work_unsafe_masks
-responses_clean$work_unsafe_masks <- sapply(responses_clean$ws_wkpl_ppe_usage_id, function(x) ifelse (x == 282, 1, 0))
+responses_clean$work_unsafe_masks <- sapply(responses_clean$ws_wkpl_ppe_usage_id, 
+                                            function(x) ifelse (x == 282, 1, 0))
 responses_clean$work_unsafe_masks[is.na(responses_clean$work_unsafe_masks)] <- 0
 
 # DERIVED FEATURE: risky_home_setting
-responses_clean$risky_home_setting <- apply(responses_clean[c('ls_dwellings_ids_143', 'ls_dwellings_ids_144', 'ls_dwellings_ids_145',
-                                                            'ls_dwellings_ids_146', 'ls_dwellings_ids_148', 'ls_dwellings_ids_149',
-                                                            'ls_dwellings_ids_150', 'ls_dwellings_ids_153')], 1, max)
+responses_clean$risky_home_setting <- apply(responses_clean[c('ls_dwellings_ids_143', 
+                                                              'ls_dwellings_ids_144', 
+                                                              'ls_dwellings_ids_145',
+                                                            'ls_dwellings_ids_146', 
+                                                            'ls_dwellings_ids_148', 
+                                                            'ls_dwellings_ids_149',
+                                                            'ls_dwellings_ids_150', 
+                                                            'ls_dwellings_ids_153')], 
+                                            1, max)
 responses_clean$risky_home_setting[is.na(responses_clean$risky_home_setting)] <- 0
 
 
 # DERIVED FEATURE: n_home_young
-responses_clean$n_home_young = sapply(responses_clean$ls_cohab_under_18, function(x) ifelse(x>8, 8, x))
+responses_clean$n_home_young = sapply(responses_clean$ls_cohab_under_18, 
+                                      function(x) ifelse(x>8, 8, x))
 responses_clean$n_home_young[is.na(responses_clean$n_home_young)] <- 0
 
 # DERIVED FEATURE: n_home_middle
-responses_clean$n_home_middle = sapply(responses_clean$ls_cohab_btw_18_64, function(x) ifelse(x>8, 8, x))
+responses_clean$n_home_middle = sapply(responses_clean$ls_cohab_btw_18_64, 
+                                       function(x) ifelse(x>8, 8, x))
 responses_clean$n_home_middle[is.na(responses_clean$n_home_middle)] <- 0
 
 # DERIVED FEATURE: n_home_older
-responses_clean$n_home_older = sapply(responses_clean$ls_cohab_over_64, function(x) ifelse(x>8, 8, x))
+responses_clean$n_home_older = sapply(responses_clean$ls_cohab_over_64, 
+                                      function(x) ifelse(x>8, 8, x))
 responses_clean$n_home_older[is.na(responses_clean$n_home_older)] <- 0
 
 # DERIVED FEATURE: home_schoolreturn
-responses_clean$home_schoolreturn = sapply(responses_clean$ls_cohab_exp_rtn_sch_id, function(x) if_else(x == 381, 1, 0))
+responses_clean$home_schoolreturn = sapply(responses_clean$ls_cohab_exp_rtn_sch_id, 
+                                           function(x) if_else(x == 381, 1, 0))
 responses_clean$home_schoolreturn[is.na(responses_clean$home_schoolreturn)] <- 0
 
 # DERIVED FEATURE: outside_childcare
-responses_clean$outside_childcare = sapply(responses_clean$ls_cohab_in_sch_or_cc, function(x) ifelse(x>8, 8, x))
+responses_clean$outside_childcare = sapply(responses_clean$ls_cohab_in_sch_or_cc, 
+                                           function(x) ifelse(x>8, 8, x))
 responses_clean$outside_childcare[is.na(responses_clean$outside_childcare)] <- 0
 
 # DERIVED FEATURE: high_partner_risk
-responses_clean$high_partner_risk <- apply(responses_clean[c('ls_cohab_jobs_ids_317', 'ls_cohab_jobs_ids_160', 'ls_cohab_jobs_ids_158',
-                                                              'ls_cohab_jobs_ids_303', 'ls_cohab_jobs_ids_302', 'ls_cohab_jobs_ids_326',
-                                                              'ls_cohab_jobs_ids_159', 'ls_cohab_jobs_ids_301', 'ls_cohab_jobs_ids_47',
-                                                              'ls_cohab_jobs_ids_623')], 1, max)
+responses_clean$high_partner_risk <- apply(responses_clean[c('ls_cohab_jobs_ids_317', 
+                                                             'ls_cohab_jobs_ids_160', 
+                                                             'ls_cohab_jobs_ids_158',
+                                                              'ls_cohab_jobs_ids_303', 
+                                                             'ls_cohab_jobs_ids_302', 
+                                                             'ls_cohab_jobs_ids_326',
+                                                              'ls_cohab_jobs_ids_159', 
+                                                             'ls_cohab_jobs_ids_301', 
+                                                             'ls_cohab_jobs_ids_47',
+                                                              'ls_cohab_jobs_ids_623')], 
+                                           1, max)
 responses_clean$high_partner_risk[is.na(responses_clean$high_partner_risk)] <- 0
 
+# DERIVED FEATURE: caregiver
+responses_clean$caregiver = ifelse((responses_clean$ls_cohab_over_64 + 
+                                     responses_clean$ls_cohab_under_18) > 1 & 
+                                     (responses_clean$ws_work_transportation_ids_53 > 0 | #works from home
+                                        responses_clean$occ_jobs_ids_180 > 0 | # Home Based Business or Stay-at-Home Caregiver
+                                        responses_clean$ws_wkpl_freq_id == 181), 1, 0) 
+responses_clean$caregiver[is.na(responses_clean$caregiver)] <- 0
+
 # DERIVED FEATURE: freq_visitors
-responses_clean$freq_visitors = as.numeric(mapvalues(responses_clean$ci_home_visitor_freq_id, 
-                                          from=c(48,49,361,362,363,364),
-                                          to=c(0,0,2,1,0,0)))
+# 361:daily, 362:weekly
+responses_clean$freq_visitors = as.numeric(as.character((
+  mapvalues(responses_clean$ci_home_visitor_freq_id, 
+            from=c(48,49,361,362,363,364),
+            to=c(0,0,2,1,0,0)))))
 responses_clean$freq_visitors[is.na(responses_clean$freq_visitors)] <- 0
 
 # DERIVED FEATURE: social_gathering
-responses_clean$social_gathering = sapply(responses_clean$ci_gatherings_last_2w_id, function(x) if_else(x == 341, 1, 0))
+responses_clean$social_gathering = sapply(responses_clean$ci_gatherings_last_2w_id, 
+                                          function(x) if_else(x == 341, 1, 0))
 responses_clean$social_gathering[is.na(responses_clean$social_gathering)] <- 0
 
 # DERIVED FEATURE: n_social_intxn
-responses_clean$n_social_intxn <- as.numeric(mapvalues(responses_clean$ci_interactions_dy_id, 
-                                            from=c(588,589,590,591,592),
-                                            to=c(0,1,2,3,4))) - 1
+# use midpoint of range in each category
+responses_clean$n_social_intxn <- as.numeric(as.character(
+  mapvalues(responses_clean$ci_interactions_dy_id, 
+            from=c(588,589,590,591,592),
+            to=as.numeric(c(0,5,20,40,75)))))
 responses_clean$n_social_intxn[is.na(responses_clean$n_social_intxn)] <- 0
 
 # DERIVED FEATURE: n_gathering
-responses_clean$n_gathering <- as.numeric(mapvalues(responses_clean$ci_gatherings_people_id, 
-                                                           from=c(343,344,345,346),
-                                                           to=c(0,1,2,3)))
+# use midpoint of range in each category
+responses_clean$n_gathering <- as.numeric(as.character(
+  mapvalues(responses_clean$ci_gatherings_people_id,
+  from=c(343,344,345,346),
+  to=c(15,35,150,300))))
 responses_clean$n_gathering[is.na(responses_clean$n_gathering)] <- 0
 
-# DERIVED FEATURE: indoor_gathering
-responses_clean$indoor_gathering <- sapply(responses_clean$ci_gatherings_location_id, function(x) ifelse (any(x==c('347', '601')), 1, 0))
-responses_clean$indoor_gathering[is.na(responses_clean$indoor_gathering)] <- 0
+# DERIVED FEATURE: gathering_risk
+# 347:indoor, 601:indoor or outdoor, 348:outdoor
+responses_clean$gathering_risk <- sapply(responses_clean$ci_gatherings_location_id, 
+                                           function(x) ifelse (any(x==c('347', '601')), 1, 0.25))
+responses_clean$gathering_risk[is.na(responses_clean$gathering_risk)] <- 0
 
 # DERIVED FEATURE: travel_plane
 responses_clean$travel_plane <- responses_clean$ws_work_transportation_ids_290
@@ -399,28 +457,37 @@ responses_clean$travel_train <- responses_clean$ws_work_transportation_ids_288
 responses_clean$travel_train[is.na(responses_clean$travel_train)] <- 0
 
 # DERIVED FEATURE: age_18
-responses_clean$age_18 <- sapply(responses_clean$md_age, function(x) ifelse (x<40, 1, 0))
+responses_clean$age_18 <- sapply(responses_clean$md_age, 
+                                 function(x) ifelse (x<40, 1, 0))
 responses_clean$age_18[is.na(responses_clean$age_18)] <- 0
 
 # DERIVED FEATURE: age_40
-responses_clean$age_40 <- sapply(responses_clean$md_age, function(x) ifelse ((x<50 & x>= 40), 1, 0))
+responses_clean$age_40 <- sapply(responses_clean$md_age, 
+                                 function(x) ifelse ((x<50 & x>= 40), 1, 0))
 responses_clean$age_40[is.na(responses_clean$age_40)] <- 0
 
 # DERIVED FEATURE: age_50
-responses_clean$age_50 <- sapply(responses_clean$md_age, function(x) ifelse ((x<60 & x>= 50), 1, 0))
+responses_clean$age_50 <- sapply(responses_clean$md_age, 
+                                 function(x) ifelse ((x<60 & x>= 50), 1, 0))
 responses_clean$age_50[is.na(responses_clean$age_50)] <- 0
 
 # DERIVED FEATURE: age_60
-responses_clean$age_60 <- sapply(responses_clean$md_age, function(x) ifelse ((x<70 & x>= 60), 1, 0))
+responses_clean$age_60 <- sapply(responses_clean$md_age, 
+                                 function(x) ifelse ((x<70 & x>= 60), 1, 0))
 responses_clean$age_60[is.na(responses_clean$age_60)] <- 0
 
 # DERIVED FEATURE: age_70
-responses_clean$age_70 <- sapply(responses_clean$md_age, function(x) ifelse ((x<80 & x>= 70), 1, 0))
+responses_clean$age_70 <- sapply(responses_clean$md_age, 
+                                 function(x) ifelse ((x<80 & x>= 70), 1, 0))
 responses_clean$age_70[is.na(responses_clean$age_70)] <- 0
 
 # DERIVED FEATURE: age_80
-responses_clean$age_80 <- sapply(responses_clean$md_age, function(x) ifelse (x>=80, 1, 0))
+responses_clean$age_80 <- sapply(responses_clean$md_age, 
+                                 function(x) ifelse (x>=80, 1, 0))
 responses_clean$age_80[is.na(responses_clean$age_80)] <- 0
+
+# DERIVED FEATURE: age_over65
+responses_clean$age_over65 <- as.factor(if_else(responses_clean$md_age >= 65, "Age >=65", "Age <65"))
 
 # DERIVED FEATURE: race_black
 responses_clean$race_black <- responses_clean$md_ethnicity_ids_40
@@ -431,29 +498,36 @@ responses_clean$hispanic <- responses_clean$md_ethnicity_ids_43
 responses_clean$hispanic[is.na(responses_clean$race_black)] <- 0
 
 # DERIVED FEATURE: kg
-responses_clean$kg <- sapply(responses_clean$md_weight, function(x) x*0.453592)
+responses_clean$kg <- sapply(responses_clean$md_weight, 
+                             function(x) x*0.453592)
 responses_clean$kg[is.na(responses_clean$kg)] <- 0
 
 # DERIVED FEATURE: meters
 gen_meters <- function(x, y){
    return((as.numeric(x)*12 + as.numeric(y))*0.0254)
 }
-responses_clean$meters <- mapply(gen_meters, responses_clean$md_height_ft, responses_clean$md_height_in)
+responses_clean$meters <- mapply(gen_meters, 
+                                 responses_clean$md_height_ft, 
+                                 responses_clean$md_height_in)
 responses_clean$meters[is.na(responses_clean$meters)] <- 0
 
 # DERIVED FEATURE: bmi
 gen_bmi <- function(x, y){
    return(x/(y^2))
 }
-responses_clean$bmi <- mapply(gen_bmi, responses_clean$kg, responses_clean$meters)
+responses_clean$bmi <- mapply(gen_bmi, 
+                              responses_clean$kg, 
+                              responses_clean$meters)
 responses_clean$bmi[is.na(responses_clean$bmi)] <- 0
 
 # DERIVED FEATURE: bmi_overweight
-responses_clean$bmi_overweight <- sapply(responses_clean$bmi, function(x) ifelse(x>=25 & x<30, 1, 0))
+responses_clean$bmi_overweight <- sapply(responses_clean$bmi, 
+                                         function(x) ifelse(x>=25 & x<30, 1, 0))
 responses_clean$bmi_overweight[is.na(responses_clean$bmi_overweight)] <- 0
 
 # DERIVED FEATURE: bmi_obese
-responses_clean$bmi_obese <- sapply(responses_clean$bmi, function(x) ifelse(x>=30, 1, 0))
+responses_clean$bmi_obese <- sapply(responses_clean$bmi, 
+                                    function(x) ifelse(x>=30, 1, 0))
 responses_clean$bmi_obese[is.na(responses_clean$bmi_obese)] <- 0
 
 # DERIVED FEATURE: co_asthma
@@ -469,22 +543,37 @@ responses_clean$cancer <- responses_clean$css_pre_existing_cond_ids_561
 responses_clean$cancer[is.na(responses_clean$cancer)] <- 0
 
 # DERIVED FEATURE: comorbidity_n
-responses_clean$comorbidity_n <- apply(responses_clean[c("css_pre_existing_cond_ids_1","css_pre_existing_cond_ids_2",
-                                                         "css_pre_existing_cond_ids_3","css_pre_existing_cond_ids_4",
+responses_clean$comorbidity_n <- apply(responses_clean[c("css_pre_existing_cond_ids_1",
+                                                         "css_pre_existing_cond_ids_2",
+                                                         "css_pre_existing_cond_ids_3",
+                                                         "css_pre_existing_cond_ids_4",
                                                          "css_pre_existing_cond_ids_547",
-                                                         "css_pre_existing_cond_ids_548","css_pre_existing_cond_ids_549",
-                                                         "css_pre_existing_cond_ids_550","css_pre_existing_cond_ids_551",
-                                                         "css_pre_existing_cond_ids_552","css_pre_existing_cond_ids_554",
-                                                         "css_pre_existing_cond_ids_555","css_pre_existing_cond_ids_556",
-                                                         "css_pre_existing_cond_ids_557","css_pre_existing_cond_ids_558",
-                                                         "css_pre_existing_cond_ids_559","css_pre_existing_cond_ids_560",
-                                                         "css_pre_existing_cond_ids_561","css_pre_existing_cond_ids_562",
-                                                         "css_pre_existing_cond_ids_563","css_pre_existing_cond_ids_564",
-                                                         "css_pre_existing_cond_ids_565","css_pre_existing_cond_ids_566",
-                                                         "css_pre_existing_cond_ids_567","css_pre_existing_cond_ids_568",
-                                                         "css_pre_existing_cond_ids_569","css_pre_existing_cond_ids_570",
-                                                         "css_pre_existing_cond_ids_81","css_pre_existing_cond_ids_82",
-                                                         "css_pre_existing_cond_ids_83")], 1, sum)
+                                                         "css_pre_existing_cond_ids_548",
+                                                         "css_pre_existing_cond_ids_549",
+                                                         "css_pre_existing_cond_ids_550",
+                                                         "css_pre_existing_cond_ids_551",
+                                                         "css_pre_existing_cond_ids_552",
+                                                         "css_pre_existing_cond_ids_554",
+                                                         "css_pre_existing_cond_ids_555",
+                                                         "css_pre_existing_cond_ids_556",
+                                                         "css_pre_existing_cond_ids_557",
+                                                         "css_pre_existing_cond_ids_558",
+                                                         "css_pre_existing_cond_ids_559",
+                                                         "css_pre_existing_cond_ids_560",
+                                                         "css_pre_existing_cond_ids_561",
+                                                         "css_pre_existing_cond_ids_562",
+                                                         "css_pre_existing_cond_ids_563",
+                                                         "css_pre_existing_cond_ids_564",
+                                                         "css_pre_existing_cond_ids_565",
+                                                         "css_pre_existing_cond_ids_566",
+                                                         "css_pre_existing_cond_ids_567",
+                                                         "css_pre_existing_cond_ids_568",
+                                                         "css_pre_existing_cond_ids_569",
+                                                         "css_pre_existing_cond_ids_570",
+                                                         "css_pre_existing_cond_ids_81",
+                                                         "css_pre_existing_cond_ids_82",
+                                                         "css_pre_existing_cond_ids_83")], 
+                                       1, sum)
 responses_clean$comorbidity_n[is.na(responses_clean$comorbidity_n)] <- 0
 
 responses_clean <- responses_clean %>% 
@@ -504,26 +593,27 @@ exposures <- responses_clean %>%
          wfh_only, n_work_interactions,
          risky_home_setting, high_partner_risk, 
          n_home_young, n_home_middle, n_home_older,
-         home_schoolreturn, outside_childcare, 
+         home_schoolreturn, outside_childcare, caregiver,
          freq_visitors,
-         social_gathering, n_social_intxn, n_gathering, indoor_gathering,
+         social_gathering, n_social_intxn, n_gathering, gathering_risk,
          travel_bus, travel_train, travel_plane,
          race_black, hispanic,
          risk_score_cover_h) %>% 
   mutate(full_home_score  = (or_risky_home^risky_home_setting) *
+             (or_caregiver^caregiver) *
            (n_home_young*(or_school_childcare^home_schoolreturn) +
            (n_home_middle + n_home_older)*(or_partner_job^high_partner_risk) +
            freq_visitors),
          score_home = if_else(full_home_score >= 15, 15, full_home_score)/15,
          
-         full_score_community = ((social_gathering*n_gathering*indoor_gathering)^2 + n_social_intxn^2)*
-           (or_race_black^race_black)*(or_hispanic^hispanic), 
-         score_community = if_else(full_score_community >= 10, 10, full_score_community)/10,
+         full_score_community = ((social_gathering*n_gathering*gathering_risk) + n_social_intxn),
+         score_community = if_else(full_score_community >= 15, 15, full_score_community)/15,
          
          full_work_score = (freq_work + freq_work_increase)*
            (or_job_risk_high^job_risk_high)*
            (or_job_risk_low^job_risk_low), 
-         score_work = if_else(full_work_score >= 10, 10, full_work_score, missing = 0)/10,
+         score_work = if_else(full_work_score >= 10, 10, 
+                              full_work_score, missing = 0)/10,
          
          score_transit = ifelse(travel_bus + travel_plane + travel_train > 0, 1, 0),
          
@@ -595,8 +685,9 @@ score_summary_part2 <- score_summary_part1 %>%
 
 score_summary <- score_summary_part2 %>% 
   mutate(score_endpoint = score_cumulative_exposure * p_clinical * susceptible,
-         endpoint_score_level = factor(if_else(score_endpoint >=40, "High", 
-                                        if_else(score_endpoint >=25 & score_endpoint <40, "Moderate",
+         endpoint_score_level = factor(if_else(score_endpoint >=30, "High", 
+                                        if_else(score_endpoint >=13 & score_endpoint <30, 
+                                                "Moderate",
                                                 "Low"), missing = "Low"), 
                                        ordered = TRUE, 
                                        levels = c("Low", "Moderate", "High")))
@@ -619,6 +710,8 @@ cumulative exposure, and risk of symptoms.
 
 ### Population Characteristics
 
+<br>
+
 ```{r}
 LOOKUP.T <- c('any_work',
               'freq_work',
@@ -628,12 +721,13 @@ LOOKUP.T <- c('any_work',
               'n_home_young',
               'n_home_middle',
               'n_home_older',
+              'caregiver',
               'home_schoolreturn',
               'freq_visitors',
               'n_social_intxn',
               'social_gathering',
               'n_gathering',
-              'indoor_gathering',
+              'gathering_risk',
               'travel_bus',
               'travel_train',
               'travel_plane',
@@ -653,6 +747,7 @@ NAMES <- c('Working currently',
            'Number of young people in household',
            'Number of middle-aged people in househouse',
            'Number of older people in household',
+           'Caregiver',
            'Children returning to school in 2020',
            'Frequency of visitors to household',
            'Number of social interactions, average contacts per day',
@@ -693,6 +788,35 @@ home, community, work, and transit; and p_clinical is the expected probability
 the invidiual would experience clinical symptoms of COVID disease
 if infected, depending on age, race, ethnicity, BMI, and comorbidities. 
 
+```{r}
+ggplot(score_summary, aes(score_cumulative_exposure, p_clinical)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlim(0,100) +
+  ylim(0,1) +
+  xlab("Transmission exposure over next 3 months") +
+  ylab("Probability of symptoms if infected") + 
+  geom_vline(xintercept = 50) + 
+  geom_hline(yintercept = .5) +
+  theme_bw() +
+  scale_color_gradient(name = "Endpoint Score", 
+                       low = "yellow", high = "red", na.value = NA)
+```
+
+##### __Figure.__ Cumulative transmission exposure score vs the probability of showing symptoms as contributors to the new endpoint risk score. 
+
+<br>
+
+```{r}
+ggplot(score_summary, aes(score_endpoint)) +
+  geom_histogram(aes(fill = endpoint_score_level), alpha = .6, binwidth = 2) +
+  xlab('Endpoint Risk Score') +
+  ylab('Number of people in registry') +
+  theme_bw() 
+```
+
+##### __Figure.__ Distribution of Endpoint Risk Score
+
+<br>
 
 ```{r}
 ggplot(score_summary, aes(score_endpoint, risk_score_cover_h)) +
@@ -716,37 +840,22 @@ The distribution of magic endpoint risk scores can be described using percentile
 These percentiles may be considered in the future as thresholds to define levels
 of exposure risk. 
 
+##### __Table.__ Percentiles of endpoint risk score distribution
+
 ```{r}
 quantile(score_summary$score_endpoint, c(.025, .25, .33, .5, .67, .75, .985))
 ```
 
-Based on these findings, we defined a threshold for high risk of being an endpoint if an individual 
-has a magic Endpoint Risk Score >=45. Given the population mix in the first 350,000 responses, this 
-threshold classifies the top quarter of individuals as high risk. 
-
-```{r, include = FALSE}
-response_predictions %>% 
-  dplyr::group_by(sr_status) %>% 
-  dplyr::summarise(mean_endpoint_score = mean(score_endpoint)) 
-
-response_predictions %>% 
-  dplyr::group_by(sr_status) %>% 
-  dplyr::summarise(n = n())
-```
-
-```{r}
-ggplot(response_predictions, aes(md_age, score_endpoint)) +
-  geom_jitter(alpha = .3, aes(color = freq_work)) +
-  xlab("Age") +
-  xlim(15, 85)+
-  ylab("Endpoint Risk Score") +
-  theme_bw() +
-  scale_color_gradient(name = "Work days/wk", 
-                       low = "blue", high = "yellow", na.value = NA)
-```
-*The color scale for work represents the average number of days per week that the invidivual is working in person at the time of responding to the survey
-
 <br>
+
+```{r, include = TRUE}
+response_predictions %>% 
+  dplyr::group_by(sr_status) %>% 
+  dplyr::summarise(n = n(),
+                   mean_endpoint_score = mean(score_endpoint)) %>% 
+  kable(format = "markdown", caption = "Table. Mean endpoint risk score by enrollment status")
+```
+
 
 ### Cumulative Exposure
 
@@ -779,15 +888,8 @@ the following three months is combined in the following way:
 
 _cumulative_exposure = beta_home*score_home + beta_work*score_work + beta_community*score_community + beta_transit*score_transit_
 
-where the relative weights of each exposure setting (beta coefficients) are defined in Table 1 and the scores for each setting are defined as [WORK IN PROGRESS]:
-
-_score_home = _
-
-_score_community = _
-
-_score_work = _
-
-_score_transit = _
+where the relative weights of each exposure setting (beta coefficients) are defined in Table 1 and the scores for each setting are defined 
+in the [analysis plan here](https://docs.google.com/document/d/1U6jhMBk66-rlcWUPsLwZ0iqvlL9puaQWhDhf1mVeK1w/edit#). 
 
 <br>
 
@@ -876,8 +978,87 @@ ggplot(clinical, aes(risk_score_cover_h, p_clinical)) +
 
 <br>
 
+### Age and Endpoint Risk Score
+
+```{r}
+correlation_age_endpoint <- cor(response_predictions$score_endpoint, 
+    response_predictions$md_age, 
+    method = c("pearson", "kendall", "spearman"))
+```
+
+The Endpoint Risk Score is related to age with a correlation coefficient of `r round(correlation_age_endpoint, digits = 3)`. 
+we generated the figures below. 
+The color scale for work represents the average number of days per week that the individual is working in person at the time of responding to the survey
+We are particularly interested in the emphasis on the older age group 
+e.g. > 65 who are being targeted.
+
+```{r}
+ggplot(response_predictions, aes(md_age, score_endpoint)) + 
+  geom_smooth(method = "lm", size = 2, se = TRUE) +
+  xlab("Age") +
+  ylab("Endpoint Risk Score") +
+  xlim(20, 85) +
+  ylim(0, 100) +
+  theme_bw()
+```
+
+##### __Figure.__ Linear association between the endpoint risk score and age
+
+<br>
+
+```{r}
+ggplot(response_predictions, aes(md_age, score_endpoint)) +
+  geom_jitter(alpha = .3, aes(color = freq_work)) +
+  xlab("Age") +
+  xlim(15, 85)+
+  ylab("Endpoint Risk Score") +
+  theme_bw() +
+  scale_color_gradient(name = "Work days/wk", 
+                       low = "blue", high = "yellow", na.value = NA)
+```
+
+##### __Figure.__ Age vs endpoint risk score, colored by work days per week 
+
+<br>
+
+```{r}
+ggplot(response_predictions, aes(age_over65, score_endpoint)) +
+  geom_boxplot() +
+  xlab("Age") +
+  ylab("Endpoint Risk Score") +
+  theme_bw()
+```
+
+
+<br>
+
 ### Sensitivity Analysis 
 
+
+
+#### Marginal effects
+
+```{r}
+margins_0 <- response_predictions
+
+margins_1 <- response_predictions
+```
+
+
+
+
+# Discussion
+
+The vaccine endpoint risk score developed here may be a useful tool to enrich the 
+population assessed for enrollment.
+
+<br>
+
+## APPENDIX
+
+<br>
+
+### Evaluation of driving features using linear regression 
 _What are the main volunteer characteristics that are driving the Endpoint Risk Score?_ 
 
 The linear regression below evaluates the relationship between the 
@@ -910,39 +1091,13 @@ fit <- glm(score_endpoint ~ md_age + comorbidity_n + cancer +
              job_risk_high + job_risk_low +
              n_home_young + n_home_middle + n_home_older +
              home_schoolreturn + freq_visitors +
-             n_social_intxn + n_gathering + indoor_gathering +
+             n_social_intxn + n_gathering + gathering_risk +
              travel_bus + travel_train + travel_plane, 
            data = response_predictions)
 
 summary(fit)
 ```
 
-
-We are particularly interested in the emphasis on the older age group 
-e.g. > 65 who are being targeted.
-
-```{r}
-ggplot(response_predictions, aes(md_age, score_endpoint)) + 
-  geom_smooth(method = "lm", size = 2) +
-  xlab("Age") +
-  ylab("Endpoint Risk Score") +
-  xlim(20, 85) +
-  ylim(0, 100) +
-  theme_bw()
-```
-
-
-
-# Discussion
-
-The vaccine endpoint risk score developed here may be a useful tool to enrich the 
-population assessed for enrollment.
-
-<br>
-
-## APPENDIX
-
-<br>
 
 
 ```{r}
@@ -960,183 +1115,10 @@ ggplot(score_summary, aes(score_cumulative_exposure, p_clinical)) +
 
 ##### __Figure.__ Exploratory evaluation of exposure vs clinical scores
 
-<br>
+
+### R Session Information
 
 ```{r}
-ggplot(score_summary, aes(score_home, score_work)) +
-  geom_jitter(alpha = .3, aes(color = score_community)) +
-  xlim(0,1) +
-  ylim(0,1) +
-  xlab("Home exposure probability") +
-  ylab("Work exposure probability") + 
-  geom_vline(xintercept = .5) + geom_hline(yintercept = .5) +
-  theme_bw() +
-  scale_color_gradient(name = "Community exposure", 
-                       low = "grey", high = "blue", na.value = NA)
-```
-
-##### __Figure.__ Distribution of home exposure and work exposure dimentions of the cumulative exposure score
-
-<br>
-
-```{r}
-ggplot(score_summary, aes(score_home, score_work)) +
-  geom_jitter(alpha = .3, aes(color = score_community)) +
-  xlim(0,1) +
-  ylim(0,1) +
-  xlab("Home exposure probability") +
-  ylab("Work exposure probability") + 
-  geom_vline(xintercept = .5) + geom_hline(yintercept = .5) +
-  theme_bw() +
-  scale_color_gradient(name = "Transit exposure", 
-                       low = "grey", high = "green", na.value = NA)
-```
-
-##### __Figure.__ Correlation between home and work exposure
-
-
-```{sql connection=, eval = FALSE}
-
-/* Neil's interim risk of infection score */
-select 
-  /* Sum the scores here for a total */
- (
-   hh_score
-   + work_score
-   + social_score
-   + transit_score
- ) * power (comorbid_score, 1.3) total_score,
-  srp.*
-from (
-  /* Do individual scoring here, such as cancer */
-  select
-    (nvl(LS_COHAB_BTW_18_64, 0) + nvl(LS_COHAB_OVER_64, 0) + nvl(LS_COHAB_UNDER_18, 0)
-      * power(school_exposure, 1.5) - 1)
-      * ((work_days) * (24-8-1-8) + (7-work_days) * (24-8))
-      * power(caregiver, 1.2) + (hh_other_adult)*(7*8) 
-      hh_score,
-    work_days * 8 * power(high_risk_prof, 5)
-      * power(work_cleaning, 0.8)
-      * 3 -- workfactor of 3 as a placeholder
-      work_score,
-    event_location_score
-      * greatest(
-          1, 
-          interactions - (nvl(LS_COHAB_BTW_18_64, 0) + nvl(LS_COHAB_OVER_64, 0) + nvl(LS_COHAB_UNDER_18, 0))
-        ) 
-      * 3 -- socialfactor of 3 as a placeholder
-      social_score,
-    (work_days * 1) * uses_transit * 5 -- traveltime = 1 as a placeholder; transitfactor of 5 as a placeholder
-      transit_score,
-    srp.*
-  from (
-    select srp.*,
-      /* Do pre calculations here, such as age grouping */
-       case
-         when LS_COHAB_BTW_18_64 + LS_COHAB_OVER_64 - 1 > 0
-         then 1
-         else 0
-       end hh_other_adult,
-       case
-         when OCC_STUDENT_ID = 121 -- Yes
-           and OCC_RETURN_TO_SCHOOL_ID = 123 -- Yes
-         then 1
-         else 0
-       end school_exposure,
-       case 
-         when WS_WKPL_FREQ_ID = 201 -- 1 day/wk
-         then 1
-         when WS_WKPL_FREQ_ID = 202 -- 2-4 days/wk
-         then 3
-         when WS_WKPL_FREQ_ID = 221 -- 5+ days/wk
-         then 5
-         else 0
-       end work_days,
-       case 
-         when LS_COHAB_OVER_64 + LS_COHAB_UNDER_18 > 1 
-           and (instr(':' || OCC_JOBS_IDS || ':', ':180:') > 0  -- Home Based Business or Stay-at-Home Caregiver
-             or instr(':' || WS_WORK_TRANSPORTATION_IDS  || ':', ':53:') > 0 -- Work from home
-             or WS_WKPL_FREQ_ID = 181  -- How often do you go in person to your main workplace currently = Not at all
-           ) 
-         then 1
-         else 0
-       end caregiver,
-       case when WS_WKPL_SCL_DIS_MEAS_ID = 265 then 1 else 0 end -- Yes
-         + case when WS_WKPL_CLEANING_ID = 268 then 1 else 0 end -- Yes
-         + case when WS_WKPL_PPE_USAGE_ID = 281 then 1 else 0 end -- Yes
-         work_cleaning,
-        case 
-          when instr(':' || OCC_JOBS_IDS || ':', ':135:') > 0 -- Sales or Customer Service
-            or instr(':' || OCC_JOBS_IDS || ':', ':137:') > 0 -- Healthcare Worker
-            or instr(':' || OCC_JOBS_IDS || ':', ':138:') > 0 -- Healthcare Support Occupation
-            or instr(':' || OCC_JOBS_IDS || ':', ':139:') > 0 -- Dental or Orthodontic
-            or instr(':' || OCC_JOBS_IDS || ':', ':140:') > 0 -- Personal Care and Personal Services
-            or instr(':' || OCC_JOBS_IDS || ':', ':161:') > 0 -- Community and Social Services
-            or instr(':' || OCC_JOBS_IDS || ':', ':162:') > 0 -- Protective Services and First Responders
-            or instr(':' || OCC_JOBS_IDS || ':', ':163:') > 0 -- Food Preparation and Service Related
-            or instr(':' || OCC_JOBS_IDS || ':', ':164:') > 0 -- Factory for Food Processing and Production
-            or instr(':' || OCC_JOBS_IDS || ':', ':166:') > 0 -- Manufacturing and Production
-            or instr(':' || OCC_JOBS_IDS || ':', ':168:') > 0 -- Grounds Cleaning and Maintenance
-            or instr(':' || OCC_JOBS_IDS || ':', ':171:') > 0 -- Warehouse or Fulfillment Center
-            or instr(':' || OCC_JOBS_IDS || ':', ':173:') > 0 -- Delivery Services
-            or instr(':' || OCC_JOBS_IDS || ':', ':178:') > 0 -- Child Care Facility
-            or instr(':' || OCC_JOBS_IDS || ':', ':46:') > 0 -- Public Transportation (was 701)
-            or instr(':' || OCC_JOBS_IDS || ':', ':621:') > 0 -- Travel and Tourism
-            or instr(':' || OCC_JOBS_IDS || ':', ':622:') > 0 -- Mortuary or Medical Examiner
-          then 1
-          else 0
-        end high_risk_prof,
-        case
-          when CI_GATHERINGS_LOCATION_ID = 348 -- Outdoor
-          then 1
-          when CI_GATHERINGS_LOCATION_ID = 347 -- Indoor
-          then 3
-          else 4 -- Both
-        end event_location_score,
-        case 
-          when WS_WORK_INTERACTIONS_DY_ID = 584 -- b/t 1-10 ppl day
-          then 5
-          when WS_WORK_INTERACTIONS_DY_ID = 585 -- b/t 11-30 ppl day
-          then 20
-          when WS_WORK_INTERACTIONS_DY_ID = 586 -- b/t 31-50 ppl day
-          then 40
-          when WS_WORK_INTERACTIONS_DY_ID = 587 -- 51 or over ppl day
-          then 60
-          else 0 -- "no one"
-        end interactions,
-        case
-          when instr(':' || WS_WORK_TRANSPORTATION_IDS  || ':', ':287:') > 0  -- Bus
-            or instr(':' || WS_WORK_TRANSPORTATION_IDS  || ':', ':288:') > 0  -- Train / subway
-            or instr(':' || WS_WORK_TRANSPORTATION_IDS  || ':', ':290:') > 0  -- Frequent air travel
-          then 1
-          else 0 
-        end uses_transit,
-        case 
-          when instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':549:') > 0 -- Asthma
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':550:') > 0 -- COPD
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':551:') > 0 -- Pulmonary fibrosis
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':552:') > 0 -- Cystic fibrosis
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':561:') > 0 -- Cancer - undergoing treatment
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':562:') > 0 -- Diabetes (type 1)
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':563:') > 0 -- Diabetes (type 2)
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':2:') > 0 -- Immunocompromising or immunosuppressive condition
-            or instr(':' || CSS_PRE_EXISTING_COND_IDS || ':', ':1:') > 0 -- Hospitalized in the last 6 months
-          then 1
-          else 0
-        end comorbid_score,
-        case 
-          when CI_GATHERINGS_LAST_2W_ID = 341 -- Yes
-          then 1
-          else 0
-        end gatherings_last_2w_score,
-        case 
-          when CI_HOME_VISITOR_FREQ_ID = 361 -- Daily
-          then 1
-          else 0
-        end home_visitor_freq_score
-    from survey_responses_pivot_mv srp
-    where sr_status in ('COMPLETED', 'ENROLLED')
-  ) srp
-) srp
+sessionInfo()
 ```
 
