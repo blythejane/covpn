@@ -528,6 +528,25 @@ responses_clean$age_80[is.na(responses_clean$age_80)] <- 0
 # DERIVED FEATURE: age_over65
 responses_clean$age_over65 <- as.factor(if_else(responses_clean$md_age >= 65, "Age >=65", "Age <65"))
 
+### CATEGORICAL TO DESCRIBE POPULATION IN BASELINE TABLE
+responses_clean <- responses_clean %>% 
+  dplyr::mutate(age_cat = 0,
+                age_cat = ifelse(age_18 == 1, "18-39",
+                          age_cat),
+                age_cat = ifelse(age_40 == 1, "40-49",
+                          age_cat), 
+                age_cat = ifelse(age_50 == 1, "50-59",
+                          age_cat), 
+                age_cat = ifelse(age_60 == 1, "60-69",
+                          age_cat), 
+                age_cat = ifelse(age_70 == 1, "70-79",
+                          age_cat), 
+                age_cat = ifelse(age_80 == 1, "80+",
+                          age_cat),
+                age_cat = ordered(age_cat, levels = c("18-39", '40-49', 
+                                                      '50-59', '60-69',
+                                                      '70-79', '80+')))
+
 # DERIVED FEATURE: race_black
 responses_clean$race_black <- responses_clean$md_ethnicity_ids_40
 responses_clean$race_black[is.na(responses_clean$race_black)] <- 0
@@ -618,25 +637,6 @@ responses_clean$comorbidity_n[is.na(responses_clean$comorbidity_n)] <- 0
 responses_clean <- responses_clean %>% 
   mutate(comorbidity_n = if_else(comorbidity_n >=5, 5, comorbidity_n))
 
-### CLEANED VARIABLES TO DESCRIBE POPULATION
-
-responses_clean <- responses_clean %>% 
-  dplyr::mutate(age_cat = 0,
-                age_cat = ifelse(age_18 == 1, "18-39",
-                          age_cat),
-                age_cat = ifelse(age_40 == 1, "40-49",
-                          age_cat), 
-                age_cat = ifelse(age_50 == 1, "50-59",
-                          age_cat), 
-                age_cat = ifelse(age_60 == 1, "60-69",
-                          age_cat), 
-                age_cat = ifelse(age_70 == 1, "70-79",
-                          age_cat), 
-                age_cat = ifelse(age_80 == 1, "80+",
-                          age_cat),
-                age_cat = ordered(age_cat, levels = c("18-39", '40-49', 
-                                                      '50-59', '60-69',
-                                                      '70-79', '80+')))
 ```
 
 
@@ -1122,13 +1122,20 @@ ggplot(response_predictions, aes(age_over65, score_endpoint)) +
 # helper functions for tornado diagram and marginal effects analysis
 
 gen_risk_scores <- function(dict, df, data){
+  # Generate risk scores for each person in the registry
+  # @params
+  
   
    for (row in 1:nrow(dict)){
       variable_name <- dict$variable_name[row]
       for (i in c("lower_bound", "upper_bound")){
+        
          risk_score <- run_model(data, variable_name, dict[i][row,])[[4]][c("sr_guid", "score_endpoint")]
+         
          col_name <- paste("score_endpoint", paste(variable_name, i, sep="_"), sep="_")
+         
          colnames(risk_score) <- c('sr_guid', col_name)
+         
          df <- df %>% 
             dplyr::left_join(risk_score %>% 
                                 select(sr_guid, col_name), by = "sr_guid") 
@@ -1138,6 +1145,8 @@ gen_risk_scores <- function(dict, df, data){
 }
 
 gen_df_for_plotting <- function(dict, plot_df, risk_scores_df){
+  # Generate dataframe for plotting
+  
    for (i in dict$variable_name){
       prefix <- paste("score_endpoint", i, sep="_")
       # lower bound column
@@ -1211,13 +1220,11 @@ td_plot_2 <- td_plot %>%
           xmin=as.numeric(variable_name)-0.95/2,
           xmax=as.numeric(variable_name)+0.95/2)
 
-df_global_variables <- tibble::rownames_to_column(dict_global_variables, "variable_name")
-
 td_plot_2 <- td_plot_2 %>% 
-   dplyr::left_join(df_global_variables %>% 
+   dplyr::left_join(or_dict %>% 
                        select(variable_name, lower_bound, upper_bound), by = "variable_name") 
 
-ggplot() + 
+figure_tornado_sensitivity <- ggplot() + 
    geom_rect(data = td_plot_2, 
              aes(ymax=ymax, ymin=ymin, xmax=xmax, xmin=xmin, fill=type)) +
    geom_text(data = td_plot_2[td_plot_2$type == "lower_bound",], 
@@ -1298,8 +1305,10 @@ ggplot(data=me_plot, aes(x=reorder(variable_name, absdiff), y=diff)) +
    geom_bar(stat="identity") +  coord_flip()
 
 ```
+
+
 ```{r}
-fig_sensitivity_tornado
+figure_tornado_sensitivity
 ```
 
 
