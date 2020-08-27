@@ -16,6 +16,8 @@ __By:__ Blythe Adamson, blythejane@gmail.com
 
 __Collaborators:__ James Kublin, Neil Abernethy, Abigail Orlando
 
+__Analysis Plan:__ [Link here](https://docs.google.com/document/d/1U6jhMBk66-rlcWUPsLwZ0iqvlL9puaQWhDhf1mVeK1w/edit?usp=sharing) 
+
 <br>
 
 ```{r global_options, include=FALSE}
@@ -50,7 +52,12 @@ or_work_unsafe_distance <- 2.0
 or_work_unsafe_masks <- 2.0
 
 # Clinical risk odds ratios
-p_clinical_age50 <- 0.7 
+p_clinical_age18 <- 0.33 # Source: Davies et al Nature Med 2020
+p_clinical_age40 <- 0.40 # Source: Davies et al Nature Med 2020
+p_clinical_age50 <- 0.49 # Source: Davies et al Nature Med 2020
+p_clinical_age60 <- 0.63 # Source: Davies et al Nature Med 2020
+p_clinical_age70 <- 0.69 # Source: Davies et al Nature Med 2020
+p_clinical_age80 <- 0.69 # Source: Davies et al Nature Med 2020
 or_age18 <- 0.1
 or_age40 <- 0.4
 or_age60 <- 1.1
@@ -334,7 +341,7 @@ responses_clean$n_transit_methods <- apply(responses_clean, 1, gen_n_transit_met
 
 # DERIVED FEATURE: wfh_only
 gen_wfh_only <- function(df){
-   wfh_only <- ifelse ((df['n_transit_methods']=0 & (as.numeric(df["ws_work_transportation_ids_53"]) == 1)), 1, 0)
+   wfh_only <- ifelse ((df['n_transit_methods']==0 & (as.numeric(df["ws_work_transportation_ids_53"]) == 1)), 1, 0)
    return(wfh_only)
 }
 responses_clean$wfh_only <- apply(responses_clean, 1, gen_wfh_only)
@@ -578,6 +585,7 @@ responses_clean$comorbidity_n[is.na(responses_clean$comorbidity_n)] <- 0
 
 responses_clean <- responses_clean %>% 
   mutate(comorbidity_n = if_else(comorbidity_n >=5, 5, comorbidity_n))
+
 ```
 
 
@@ -638,11 +646,20 @@ score_summary_part1 <- exposures %>%
 # Define clinical symptomatic risk score
 
 alpha_clinical <- log(p_clinical_age50/(1- p_clinical_age50))
+
+alpha_clinical_age18 <- log(p_clinical_age18/(1- p_clinical_age18))
+alpha_clinical_age40 <- log(p_clinical_age40/(1- p_clinical_age40))
+alpha_clinical_age50 <- log(p_clinical_age50/(1- p_clinical_age50))
+alpha_clinical_age60 <- log(p_clinical_age60/(1- p_clinical_age60))
+alpha_clinical_age70 <- log(p_clinical_age70/(1- p_clinical_age70))
+alpha_clinical_age80 <- log(p_clinical_age80/(1- p_clinical_age80))
+
 beta_age18 <- log(or_age18)
 beta_age40 <- log(or_age40)
 beta_age60 <- log(or_age60)
 beta_age70 <- log(or_age70)
 beta_age80 <- log(or_age80)
+
 beta_race_black <- log(or_race_black)
 beta_hispanic <- log(or_hispanic)
 beta_bmi_overweight <- log(or_bmi_overweight)
@@ -658,17 +675,18 @@ clinical <- responses_clean %>%
          race_black, hispanic,
          comorbidity_n, cancer,
          risk_score_cover_h) %>% 
-  mutate(logistic = alpha_clinical + 
-                             beta_age18*age_18 + 
-                             beta_age40*age_40 +
-                             beta_age60*age_60 +
-                             beta_age70*age_70 +
-                             beta_age80*age_80 +
+  mutate(logistic = alpha_clinical_age18*age_18 + 
+           alpha_clinical_age40*age_40 +
+           alpha_clinical_age40*age_50 +
+           alpha_clinical_age40*age_60 +
+           alpha_clinical_age40*age_70 +
+           alpha_clinical_age40*age_80 +
                              beta_race_black*race_black +
                              beta_hispanic*hispanic +
                              beta_bmi_overweight*bmi_overweight +
                              beta_bmi_obese*bmi_obese + 
                              beta_comorbidity_n*comorbidity_n + 
+                             beta_comorbidity_n*(comorbidity_n*age_80)^2 +  #intrxn bw age >80 and comorbidities
                              beta_cancer*cancer,
          p_clinical = exp(logistic) /
            (1 + exp(logistic))) %>% 
@@ -691,6 +709,8 @@ score_summary <- score_summary_part2 %>%
                                                 "Low"), missing = "Low"), 
                                        ordered = TRUE, 
                                        levels = c("Low", "Moderate", "High")))
+
+(1-p_clinical)
 
 # final analysis data frame with all cleaned responses and model predictions
 response_predictions <- responses_clean %>% 
