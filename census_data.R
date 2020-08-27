@@ -96,3 +96,13 @@ census_clean <- raw_census %>%
          age18_34 = age18_24 + age25_34,
          age55_64 = age55_59 + age60_61 + age62_64) 
 
+# fix for NYC (per case data, need to combine Kings, New York, Queens, Bronx and Richmond counties; i.e., all boroughs)
+census_nyc <- census_clean %>%
+  filter(GEOID %in% c("36061", "36047", "36081", "36005", "36085")) %>%
+  dplyr::mutate(population = sum(population)) %>%
+  dplyr::mutate_if(is.numeric, weighted.mean, na.rm = TRUE) %>%
+  filter(GEOID == "36061")
+
+census_clean <- census_clean %>%
+  filter(GEOID != "36061") %>%
+  rbind(census_nyc)
