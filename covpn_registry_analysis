@@ -38,7 +38,8 @@ options(ore.warn.order=FALSE)
 beta_home <- .2
 beta_work <- .3
 beta_community <- .4
-beta_transit <- .1
+beta_transit <- 0.1
+w_clinical <- 0.2 # weight of symptoms contributing to total endpoint score
 
 # Exposure odds ratios
 or_risky_home <- 3.0
@@ -52,18 +53,43 @@ or_work_unsafe_distance <- 2.0
 or_work_unsafe_masks <- 2.0
 
 # Clinical risk odds ratios
+# Probability of showing symptoms if infected
 p_clinical_age18 <- 0.33 # Source: Davies et al Nature Med 2020
 p_clinical_age40 <- 0.40 # Source: Davies et al Nature Med 2020
 p_clinical_age50 <- 0.49 # Source: Davies et al Nature Med 2020
 p_clinical_age60 <- 0.63 # Source: Davies et al Nature Med 2020
 p_clinical_age70 <- 0.69 # Source: Davies et al Nature Med 2020
 p_clinical_age80 <- 0.69 # Source: Davies et al Nature Med 2020
+
+alpha_clinical_age18 <- log(p_clinical_age18/(1- p_clinical_age18))
+alpha_clinical_age40 <- log(p_clinical_age40/(1- p_clinical_age40))
+alpha_clinical_age50 <- log(p_clinical_age50/(1- p_clinical_age50))
+alpha_clinical_age60 <- log(p_clinical_age60/(1- p_clinical_age60))
+alpha_clinical_age70 <- log(p_clinical_age70/(1- p_clinical_age70))
+alpha_clinical_age80 <- log(p_clinical_age80/(1- p_clinical_age80))
+
+# increased risk of showing symptoms if infected
 or_race_black <- 5
 or_hispanic <- 5
 or_bmi_overweight <- 1.5
 or_bmi_obese <- 3
 or_comorbidity_n <- 1.3 #Source: Cover risk score
 or_cancer <- 3 #source: cover risk score
+
+beta_race_black <- log(or_race_black)
+beta_hispanic <- log(or_hispanic)
+beta_bmi_overweight <- log(or_bmi_overweight)
+beta_bmi_obese <- log(or_bmi_obese)
+beta_comorbidity_n <- log(or_comorbidity_n)
+beta_cancer <- log(or_cancer)
+
+or_cols = c("or_risky_home", "or_school_childcare", "or_partner_job",
+            "or_job_risk_high", "or_job_risk_low", "or_wfh",
+            "or_work_unsafe_distance", "or_work_unsafe_masks",
+            "p_clinical_age18", "p_clinical_age40", "p_clinical_age50", "p_clinical_age60",
+            "p_clinical_age70","p_clinical_age80", "or_race_black", "or_hispanic", 
+            "or_bmi_overweight", "or_bmi_obese", "or_comorbidity_n",
+            "or_cancer", "or_caregiver")
 
 ```
 
@@ -379,6 +405,10 @@ responses_clean$n_home_older = sapply(responses_clean$ls_cohab_over_64,
                                       function(x) ifelse(x>8, 8, x))
 responses_clean$n_home_older[is.na(responses_clean$n_home_older)] <- 0
 
+# DERIVED FEATURE: n_home_total
+responses_clean <- responses_clean %>% 
+  dplyr::mutate(n_home_total = n_home_young + n_home_middle + n_home_older + 1)
+
 # DERIVED FEATURE: home_schoolreturn
 responses_clean$home_schoolreturn = sapply(responses_clean$ls_cohab_exp_rtn_sch_id, 
                                            function(x) if_else(x == 381, 1, 0))
@@ -405,7 +435,7 @@ responses_clean$high_partner_risk[is.na(responses_clean$high_partner_risk)] <- 0
 
 # DERIVED FEATURE: caregiver
 responses_clean$caregiver = ifelse((responses_clean$ls_cohab_over_64 + 
-                                     responses_clean$ls_cohab_under_18) > 1 & 
+                                     responses_clean$ls_cohab_under_18) >= 1 & 
                                      (responses_clean$ws_work_transportation_ids_53 > 0 | #works from home
                                         responses_clean$occ_jobs_ids_180 > 0 | # Home Based Business or Stay-at-Home Caregiver
                                         responses_clean$ws_wkpl_freq_id == 181), 1, 0) 
@@ -457,6 +487,13 @@ responses_clean$travel_bus[is.na(responses_clean$travel_bus)] <- 0
 # DERIVED FEATURE: travel_train
 responses_clean$travel_train <- responses_clean$ws_work_transportation_ids_288
 responses_clean$travel_train[is.na(responses_clean$travel_train)] <- 0
+
+# DERIVED FEATURE: travel_public_transit
+# 287:bus, 288:train, 290:plane
+responses_clean$travel_public_transit <- if_else(responses_clean$ws_work_transportation_ids_287 + 
+                                                   responses_clean$ws_work_transportation_ids_288 +
+                                                   responses_clean$ws_work_transportation_ids_290 >=1,
+                                                 1, 0, missing = 0)
 
 # DERIVED FEATURE: age_18
 responses_clean$age_18 <- sapply(responses_clean$md_age, 
@@ -581,6 +618,25 @@ responses_clean$comorbidity_n[is.na(responses_clean$comorbidity_n)] <- 0
 responses_clean <- responses_clean %>% 
   mutate(comorbidity_n = if_else(comorbidity_n >=5, 5, comorbidity_n))
 
+### CLEANED VARIABLES TO DESCRIBE POPULATION
+
+responses_clean <- responses_clean %>% 
+  dplyr::mutate(age_cat = 0,
+                age_cat = ifelse(age_18 == 1, "18-39",
+                          age_cat),
+                age_cat = ifelse(age_40 == 1, "40-49",
+                          age_cat), 
+                age_cat = ifelse(age_50 == 1, "50-59",
+                          age_cat), 
+                age_cat = ifelse(age_60 == 1, "60-69",
+                          age_cat), 
+                age_cat = ifelse(age_70 == 1, "70-79",
+                          age_cat), 
+                age_cat = ifelse(age_80 == 1, "80+",
+                          age_cat),
+                age_cat = ordered(age_cat, levels = c("18-39", '40-49', 
+                                                      '50-59', '60-69',
+                                                      '70-79', '80+')))
 ```
 
 
@@ -589,10 +645,14 @@ responses_clean <- responses_clean %>%
 
 run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
    if(!is.null(risk_ratio_variable) & !is.null(risk_ratio_value)) {
-      # temporarily overwrite variable
-      assign(risk_ratio_variable, risk_ratio_value)
+      if (risk_ratio_variable %in% or_cols){
+         # temporarily overwrite variable
+         assign(risk_ratio_variable, risk_ratio_value)
+      }
+      else {
+         data[risk_ratio_variable] <- risk_ratio_value
+      }
    }
-
 
     # Define exposure score
     
@@ -607,7 +667,7 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
              home_schoolreturn, outside_childcare, caregiver,
              freq_visitors,
              social_gathering, n_social_intxn, n_gathering, gathering_risk,
-             travel_bus, travel_train, travel_plane,
+             travel_public_transit,
              race_black, hispanic,
              risk_score_cover_h) %>% 
       mutate(full_home_score  = (or_risky_home^risky_home_setting) *
@@ -631,7 +691,7 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
              score_work = if_else(full_work_score >= 10, 10, 
                                   full_work_score, missing = 0)/10,
              
-             score_transit = ifelse(travel_bus + travel_plane + travel_train > 0, 1, 0),
+             score_transit = ifelse(travel_public_transit > 0, 1, 0),
              
              score_cumulative_exposure = round((
                beta_home*score_home + 
@@ -649,22 +709,6 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
              risk_score_cover_h)
     
     # Define clinical symptomatic risk score
-    
-    alpha_clinical <- log(p_clinical_age50/(1- p_clinical_age50))
-    
-    alpha_clinical_age18 <- log(p_clinical_age18/(1- p_clinical_age18))
-    alpha_clinical_age40 <- log(p_clinical_age40/(1- p_clinical_age40))
-    alpha_clinical_age50 <- log(p_clinical_age50/(1- p_clinical_age50))
-    alpha_clinical_age60 <- log(p_clinical_age60/(1- p_clinical_age60))
-    alpha_clinical_age70 <- log(p_clinical_age70/(1- p_clinical_age70))
-    alpha_clinical_age80 <- log(p_clinical_age80/(1- p_clinical_age80))
-    
-    beta_race_black <- log(or_race_black)
-    beta_hispanic <- log(or_hispanic)
-    beta_bmi_overweight <- log(or_bmi_overweight)
-    beta_bmi_obese <- log(or_bmi_obese)
-    beta_comorbidity_n <- log(or_comorbidity_n)
-    beta_cancer <- log(or_cancer)
     
     clinical <- responses_clean %>% 
       select(sr_guid,
@@ -697,9 +741,9 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
                   select(sr_guid, p_clinical, score_control), by = "sr_guid") 
 
     score_summary <- score_summary_part2 %>% 
-      mutate(score_endpoint = score_cumulative_exposure * p_clinical * susceptible,
-             endpoint_score_level = factor(if_else(score_endpoint >=30, "High", 
-                                            if_else(score_endpoint >=13 & score_endpoint <30, 
+      mutate(score_endpoint = score_cumulative_exposure * p_clinical^w_clinical * susceptible,
+             endpoint_score_level = factor(if_else(score_endpoint >=36, "High", 
+                                            if_else(score_endpoint >=19 & score_endpoint <36, 
                                                     "Moderate",
                                                     "Low"), missing = "Low"), 
                                            ordered = TRUE, 
@@ -739,15 +783,24 @@ cumulative exposure, and risk of symptoms.
 
 <br>
 
-```{r}
-LOOKUP.T <- c('any_work',
+```{r baseline table}
+
+
+
+LOOKUP.T <- c('age_cat',
+              'md_age',
+              'race_black',
+              'hispanic',
+              'bmi_overweight',
+              'bmi_obese',
+              'comorbidity_n',
+              'cancer',
+              'any_work',
               'freq_work',
               'freq_work_increase',
               'job_risk_high',
               'job_risk_low',
-              'n_home_young',
-              'n_home_middle',
-              'n_home_older',
+              'n_home_total',
               'caregiver',
               'home_schoolreturn',
               'freq_visitors',
@@ -755,47 +808,37 @@ LOOKUP.T <- c('any_work',
               'social_gathering',
               'n_gathering',
               'gathering_risk',
-              'travel_bus',
-              'travel_train',
-              'travel_plane',
-              'md_age',
-              'race_black',
-              'hispanic',
-              'bmi_overweight',
-              'bmi_obese',
-              'comorbidity_n',
-              'cancer')
+              'travel_public_transit'
+              )
 
-NAMES <- c('Working currently',
-           'Frequency of work, average days per week',
-           'Increasing frequency of work in next 3 months, additional days per week',
-           'High risk job function',
-           'Low risk job function', 
-           'Number of young people in household',
-           'Number of middle-aged people in househouse',
-           'Number of older people in household',
-           'Caregiver',
-           'Children returning to school in 2020',
-           'Frequency of visitors to household',
-           'Number of social interactions, average contacts per day',
-           'Attending a social gathering in past 2 weeks',
-           'Attended indoor social gathering in past 2 weeks',
-           'Size of recent social gathering',
-           'Travel to work by bus',
-           'Travel to work by train',
-           'Travel for work frequently on airplane',
+NAMES <- c('Age, years',
            'Age, years',
            'Black or African American Race',
            'Hispanic or LatinX',
            'Overweight, body mass index 25-<30',
            'Obese, body mass index >30',
            'Number of comorbidities',
-           'Cancer, undergoing current treatment')
+           'Cancer, undergoing current treatment',
+           'Working currently',
+           'Frequency of work, average days per week',
+           'Increasing frequency of work, added days per week in next 3 months',
+           'High risk job function',
+           'Low risk job function', 
+           'Number of people living in household',
+           'Caregiver of child or elderly adult at home',
+           'Lives with children returning to school in 2020',
+           'Frequent visitors to household, daily or weekly',
+           'Number of social interactions, average contacts per day',
+           'Attending a social gathering in past 2 weeks',
+           'Attended indoor social gathering in past 2 weeks',
+           'Size of recent social gathering',
+           'Travel to work on public transit'
+           )
 
 table1 <- CreateBaselineTable(baseline_df = response_predictions, variable = 'endpoint_score_level')
 
 export2md(table1,
-          caption = "Table 1. Baseline characteristics of people in the CoVPN Screening Registry, stratified by level of Endpoint Risk Score")
+          caption = "Table 1. Baseline characteristics of volunteers in the CoVPN Screening Registry, stratified by level of Endpoint Risk Score")
 
 ```
 
@@ -821,7 +864,7 @@ ggplot(score_summary, aes(score_cumulative_exposure, p_clinical)) +
   xlim(0,100) +
   ylim(0,1) +
   xlab("Transmission exposure over next 3 months") +
-  ylab("Probability of symptoms if infected") + 
+  ylab("Clinical symptoms score") + 
   geom_vline(xintercept = 50) + 
   geom_hline(yintercept = .5) +
   theme_bw() +
@@ -984,7 +1027,7 @@ ggplot(score_summary, aes(p_clinical)) +
 ##### __Figure.__ Distribution of probability of showing clinical symptoms if infected
 
 ```{r}
-ggplot(score_summary, aes((p_clinical^.5))) +
+ggplot(score_summary, aes((p_clinical^.2))) +
   geom_histogram(fill = "black", alpha = .6, binwidth = .05) +
   xlab('Probability of clinical symptoms if infected') +
   ylab('Number of people in registry') +
@@ -1073,14 +1116,18 @@ ggplot(response_predictions, aes(age_over65, score_endpoint)) +
 
 ### Sensitivity Analysis 
 
-```{r}
-# generate risk scores for tornado diagram
-gen_td_scores <- function(dict, df, data){
+
+```{r sensitivity analysis}
+
+# helper functions for tornado diagram and marginal effects analysis
+
+gen_risk_scores <- function(dict, df, data){
+  
    for (row in 1:nrow(dict)){
-      risk_ratio_variable <- rownames(dict)[row]
-      for (i in c("lower_bound", "current_val", "upper_bound")){
-         risk_score <- run_model(data, risk_ratio_variable, dict[risk_ratio_variable, ][i][,])[[4]][c("sr_guid", "score_endpoint")]
-         col_name <- paste("score_endpoint", paste(risk_ratio_variable, i, sep="_"), sep="_")
+      variable_name <- dict$variable_name[row]
+      for (i in c("lower_bound", "upper_bound")){
+         risk_score <- run_model(data, variable_name, dict[i][row,])[[4]][c("sr_guid", "score_endpoint")]
+         col_name <- paste("score_endpoint", paste(variable_name, i, sep="_"), sep="_")
          colnames(risk_score) <- c('sr_guid', col_name)
          df <- df %>% 
             dplyr::left_join(risk_score %>% 
@@ -1090,95 +1137,85 @@ gen_td_scores <- function(dict, df, data){
    return(df)
 }
 
+gen_df_for_plotting <- function(dict, plot_df, risk_scores_df){
+   for (i in dict$variable_name){
+      prefix <- paste("score_endpoint", i, sep="_")
+      # lower bound column
+      lb_col <- paste(prefix, "lower_bound", sep="_")
+      lb_mean <- mean(risk_scores_df[lb_col][,])
+      # upper bound column
+      ub_col <- paste(prefix, "upper_bound", sep="_")
+      ub_mean <-  mean(risk_scores_df[ub_col][,])
+      plot_df <- rbind(plot_df, data.frame(variable_name=c(i),
+                                           lower_bound=c(lb_mean),
+                                           upper_bound=c(ub_mean)))
+   }
+   return(plot_df)
+}
+
+# Generate risk scores and plot data for tornado diagram 
+
 # dictionary of lower, upper, and current values for each OR variable
-dict_global_variables <- data.frame(row.names=c("or_risky_home", "or_school_childcare", "or_partner_job",
-                                                "or_job_risk_high", "or_job_risk_low", "or_wfh",
-                                                "or_work_unsafe_distance", "or_work_unsafe_masks",
-                                                "p_clinical_age18", "p_clinical_age40", "p_clinical_age50", "p_clinical_age60",
-                                                "p_clinical_age70","p_clinical_age80", "or_race_black", "or_hispanic", 
-                                                "or_bmi_overweight", "or_bmi_obese", "or_comorbidity_n",
-                                                "or_cancer", "or_caregiver"), 
-                                    current_val=c(or_risky_home, or_school_childcare, or_partner_job,
-                                                  or_job_risk_high, or_job_risk_low, or_wfh,
-                                                  or_work_unsafe_distance, or_work_unsafe_masks,
-                                                  p_clinical_age50, or_age18, or_age40, or_age60,
-                                                  or_age70, or_age80, or_race_black, or_hispanic, 
-                                                  or_bmi_overweight, or_bmi_obese, or_comorbidity_n,
-                                                  or_cancer, or_caregiver),
-                                    lower_bound=c(1.0, 1.0, 1.0, 
-                                                  1.0, 0.01, 0.01, 
-                                                  1.0, 1.0, 
-                                                  0.3, 0.3, 0.3, 3, 
-                                                  0.3, 0.3, 1.0, 1.0, 
-                                                  1.0, 1.0, 1.0, 
-                                                  1.0, 1.0),
-                                    upper_bound=c(5.0, 5.0, 5.0, 
-                                                  5.0, 1.0, 1.0, 
-                                                  5.0, 5.0, 
-                                                  1.0, 1.0, 1.0, 1.0,
-                                                  1.0, 1.0, 10.0, 10.0,
-                                                  5.0, 5.0, 3.0,
-                                                  5.0, 5.0)
-)
+or_dict <- data.frame(variable_name=or_cols, 
+                      lower_bound=c(1.0, 1.0, 1.0, 
+                                    1.0, 0.01, 0.01, 
+                                    1.0, 1.0, 
+                                    0.3, 0.3, 0.3, 0.3, 
+                                    0.3, 0.3, 1.0, 1.0, 
+                                    1.0, 1.0, 1.0, 
+                                    1.0, 1.0),
+                      upper_bound=c(5.0, 5.0, 5.0, 
+                                    5.0, 1.0, 1.0, 
+                                    5.0, 5.0, 
+                                    1.0, 1.0, 1.0, 1.0,
+                                    1.0, 1.0, 10.0, 10.0,
+                                    5.0, 5.0, 3.0,
+                                    5.0, 5.0),
+                      stringsAsFactors = FALSE)
 
 # create dataframe to patient-level risk scores for different OR values
 td_raw_data <- data.frame(responses_clean$sr_guid)
 colnames(td_raw_data) <- ('sr_guid')
 
-# create dataframe to store aggregate for tornado diagram
-td_plot <- data.frame(matrix(ncol = 4, nrow = 0))
-x <- c("risk_ratio_variable", "lower_bound", "current_val", "upper_bound")
-colnames(td_plot) <- x
-
 # generate risk scores 
-td_risk_scores <- gen_td_scores(dict_global_variables, td_raw_data, responses_clean)
+td_risk_scores <- gen_risk_scores(or_dict, td_raw_data, responses_clean)
 
 # generate mean value for each bound and OR variable
-for (i in rownames(dict_global_variables)){
-   prefix <- paste("score_endpoint", i, sep="_")
-   # lower bound column
-   lb_col <- paste(prefix, "lower_bound", sep="_")
-   lb_mean <- mean(td_risk_scores[lb_col][,])
-   # current value column
-   cv_col <- paste(prefix, "current_val", sep="_")
-   cv_mean <-  mean(td_risk_scores[cv_col][,])
-   # upper bound column
-   ub_col <- paste(prefix, "upper_bound", sep="_")
-   ub_mean <-  mean(td_risk_scores[ub_col][,])
-   
-   td_plot <- rbind(td_plot, data.frame(risk_ratio_variable=c(i),
-                                        lower_bound=c(lb_mean),
-                                        current_val=c(cv_mean),
-                                        upper_bound=c(ub_mean)))
-}
+# create dataframe to store aggregate for tornado diagram
+td_plot <- data.frame(matrix(ncol = 3, nrow = 0))
+x <- c("variable_name", "lower_bound", "upper_bound")
+colnames(td_plot) <- x
+
+td_plot <- gen_df_for_plotting(or_dict, td_plot, td_risk_scores)
+
 
 # prepare data for diagram
 #(code source: https://stackoverflow.com/questions/55751978/tornado-both-sided-
 # horizontal-bar-plot-in-r-with-chart-axes-crosses-at-a-given)
 
-td_plot<-td_plot[c('risk_ratio_variable', 'lower_bound', 'upper_bound')]
+td_plot<-td_plot[c('variable_name', 'lower_bound', 'upper_bound')]
 td_plot$ul_diff <- td_plot$upper_bound - td_plot$lower_bound
 
-current_model_mean <- cv_mean
+current_model_mean <- mean(run_model(responses_clean)[[4]][['score_endpoint']])
 
 risk_ratio_variable_levels <- td_plot %>% arrange(ul_diff) %>%
-   mutate(risk_ratio_variable=factor(x=risk_ratio_variable, levels=risk_ratio_variable)) %>%
-   select(risk_ratio_variable) %>% unlist() %>% levels()
+   mutate(variable_name=factor(x=variable_name, levels=variable_name)) %>%
+   select(variable_name) %>% unlist() %>% levels()
 
 td_plot_2 <- td_plot %>% 
    gather(key='type', value='output.value', lower_bound:upper_bound) %>%
-   select(risk_ratio_variable, type, output.value, ul_diff) %>%
-   mutate(risk_ratio_variable=factor(risk_ratio_variable, levels=risk_ratio_variable_levels),
+   select(variable_name, type, output.value, ul_diff) %>%
+   mutate(variable_name=factor(variable_name, levels=risk_ratio_variable_levels),
           ymin=pmin(output.value, current_model_mean),
           ymax=pmax(output.value, current_model_mean),
-          xmin=as.numeric(risk_ratio_variable)-0.95/2,
-          xmax=as.numeric(risk_ratio_variable)+0.95/2)
+          xmin=as.numeric(variable_name)-0.95/2,
+          xmax=as.numeric(variable_name)+0.95/2)
 
-df_global_variables <- tibble::rownames_to_column(dict_global_variables, "risk_ratio_variable")
+df_global_variables <- tibble::rownames_to_column(dict_global_variables, "variable_name")
 
 td_plot_2 <- td_plot_2 %>% 
    dplyr::left_join(df_global_variables %>% 
-                       select(risk_ratio_variable, lower_bound, upper_bound), by = "risk_ratio_variable") 
+                       select(variable_name, lower_bound, upper_bound), by = "variable_name") 
 
 ggplot() + 
    geom_rect(data = td_plot_2, 
@@ -1195,19 +1232,88 @@ ggplot() +
                       labels = risk_ratio_variable_levels) +
    labs( title= "One way sensitivity analysis", y="Score endpoint") +
    coord_flip()
+
+
+# Generate risk scores and plot data for marginal effects plot
+model_variables_dict <- data.frame(variable_name = c("any_work",
+                           "freq_work",
+                           "freq_work_increase", 
+                           "job_risk_high",
+                           "job_risk_low",
+                           "work_unsafe_distance",
+                           "work_unsafe_masks",
+                           "wfh_only",
+                           "n_work_interactions",
+                           "risky_home_setting",
+                           "high_partner_risk", 
+                           "n_home_young",
+                           "n_home_middle",
+                           "n_home_older",
+                           "home_schoolreturn",
+                           "outside_childcare",
+                           "caregiver",
+                           "freq_visitors",
+                           "social_gathering",
+                           "n_social_intxn",
+                           "n_gathering",
+                           "gathering_risk",
+                           "travel_bus",
+                           "travel_train",
+                           "travel_plane",
+                           "race_black",
+                           "hispanic",
+                           "age_18",
+                           "age_40",
+                           "age_50",
+                           "age_60",
+                           "age_70",
+                           "age_80", 
+                           "bmi_overweight", 
+                           "bmi_obese",
+                           "comorbidity_n", 
+                           "cancer"), stringsAsFactors = FALSE)
+
+model_variables_dict$lower_bound <- sapply(model_variables_dict$variable_name, function(x) min(responses_clean[x]))
+model_variables_dict$upper_bound <- sapply(model_variables_dict$variable_name, function(x) max(responses_clean[x]))
+
+# create dataframe to patient-level risk scores for different OR values
+me_raw_data <- data.frame(responses_clean$sr_guid)
+colnames(me_raw_data) <- ('sr_guid')
+
+# generate risk scores 
+me_risk_scores <- gen_risk_scores(model_variables_dict, me_raw_data, responses_clean)
+
+# generate mean value for each bound and OR variable
+# create dataframe to store aggregate for tornado diagram
+me_plot <- data.frame(matrix(ncol = 3, nrow = 0))
+x <- c("variable_name", "lower_bound",  "upper_bound")
+colnames(me_plot) <- x
+
+me_plot <- gen_df_for_plotting(model_variables_dict, me_plot, me_risk_scores)
+
+me_plot$diff <- me_plot$upper_bound - me_plot$lower_bound
+me_plot$absdiff <- abs(me_plot$diff)
+
+ggplot(data=me_plot, aes(x=reorder(variable_name, absdiff), y=diff)) +
+   geom_bar(stat="identity") +  coord_flip()
+
+```
+```{r}
+fig_sensitivity_tornado
 ```
 
 
+##### __Figure.__ Tornado diagram of one-way sensitivity analysis examining the impact of upper and lower ranges for inputs values
+
+<br>
 
 #### Marginal effects
 
 ```{r}
-margins_0 <- response_predictions
-
-margins_1 <- response_predictions
+fig_marginal_effects
 ```
 
-
+##### __Figure.__ Marginal effects of each variable on the 
 
 
 # Discussion
