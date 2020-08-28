@@ -16,8 +16,6 @@ __By:__ Blythe Adamson, blythejane@gmail.com
 
 __Collaborators:__ James Kublin, Neil Abernethy, Abigail Orlando
 
-__Analysis Plan:__ [Link here](https://docs.google.com/document/d/1U6jhMBk66-rlcWUPsLwZ0iqvlL9puaQWhDhf1mVeK1w/edit?usp=sharing) 
-
 <br>
 
 ```{r global_options, include=FALSE}
@@ -42,7 +40,7 @@ beta_transit <- 0.1
 w_clinical <- 0.2 # weight of symptoms contributing to total endpoint score
 
 # Exposure odds ratios
-or_risky_home <- 3.0
+or_risky_home <- 5.0
 or_school_childcare <- 3.0
 or_caregiver <- 1.3
 or_partner_job <- 1.5
@@ -51,6 +49,7 @@ or_job_risk_low <- 0.5
 or_wfh <- 0.01
 or_work_unsafe_distance <- 2.0
 or_work_unsafe_masks <- 2.0
+or_gathering_risk <- 3
 
 # Clinical risk odds ratios
 # Probability of showing symptoms if infected
@@ -61,27 +60,17 @@ p_clinical_age60 <- 0.63 # Source: Davies et al Nature Med 2020
 p_clinical_age70 <- 0.69 # Source: Davies et al Nature Med 2020
 p_clinical_age80 <- 0.69 # Source: Davies et al Nature Med 2020
 
-alpha_clinical_age18 <- log(p_clinical_age18/(1- p_clinical_age18))
-alpha_clinical_age40 <- log(p_clinical_age40/(1- p_clinical_age40))
-alpha_clinical_age50 <- log(p_clinical_age50/(1- p_clinical_age50))
-alpha_clinical_age60 <- log(p_clinical_age60/(1- p_clinical_age60))
-alpha_clinical_age70 <- log(p_clinical_age70/(1- p_clinical_age70))
-alpha_clinical_age80 <- log(p_clinical_age80/(1- p_clinical_age80))
-
 # increased risk of showing symptoms if infected
 or_race_black <- 5
 or_hispanic <- 5
 or_bmi_overweight <- 1.5
 or_bmi_obese <- 3
-or_comorbidity_n <- 1.3 #Source: Cover risk score
+or_comorbidity_n <- 1.6 #Source: Cover risk score
 or_cancer <- 3 #source: cover risk score
 
-beta_race_black <- log(or_race_black)
-beta_hispanic <- log(or_hispanic)
-beta_bmi_overweight <- log(or_bmi_overweight)
-beta_bmi_obese <- log(or_bmi_obese)
-beta_comorbidity_n <- log(or_comorbidity_n)
-beta_cancer <- log(or_cancer)
+ids_variable_names <- c('md_ethnicity_ids', 'occ_jobs_ids', 'ws_work_transportation_ids',
+          'ls_dwellings_ids', 'ls_cohab_jobs_ids', 'css_current_symptoms_ids',
+          'css_pre_existing_cond_ids')
 
 or_cols = c("or_risky_home", "or_school_childcare", "or_partner_job",
             "or_job_risk_high", "or_job_risk_low", "or_wfh",
@@ -89,7 +78,26 @@ or_cols = c("or_risky_home", "or_school_childcare", "or_partner_job",
             "p_clinical_age18", "p_clinical_age40", "p_clinical_age50", "p_clinical_age60",
             "p_clinical_age70","p_clinical_age80", "or_race_black", "or_hispanic", 
             "or_bmi_overweight", "or_bmi_obese", "or_comorbidity_n",
-            "or_cancer", "or_caregiver")
+            "or_cancer", "or_caregiver", "or_gathering_risk")
+
+
+# dictionary of lower, upper, and current values for each OR variable
+or_dict <- data.frame(variable_name=or_cols, 
+                      lower_bound=c(1.0, 1.0, 1.0, 
+                                    1.0, 0.01, 0.01, 
+                                    1.0, 1.0, 
+                                    0.3, 0.3, 0.3, 0.3, 
+                                    0.3, 0.3, 1.0, 1.0, 
+                                    1.0, 1.0, 1.0, 
+                                    1.0, 1.0, 1.0),
+                      upper_bound=c(10.0, 5.0, 5.0, 
+                                    5.0, 1.0, 1.0, 
+                                    5.0, 5.0, 
+                                    1.0, 1.0, 1.0, 1.0,
+                                    1.0, 1.0, 10.0, 10.0,
+                                    5.0, 10.0, 20.0,
+                                    10.0, 5.0, 5.0),
+                      stringsAsFactors = FALSE)
 
 ```
 
@@ -215,11 +223,14 @@ names(question) <- tolower(names(question))
 
 ```{r functions}
 
-ids_variable_names <- c('md_ethnicity_ids', 'occ_jobs_ids', 'ws_work_transportation_ids',
-          'ls_dwellings_ids', 'ls_cohab_jobs_ids', 'css_current_symptoms_ids',
-          'css_pre_existing_cond_ids')
-
 MakeDummyNames <- function(v, prefix = '') {
+  # Make the variable names needed for all dummy variables needed in the analysis
+  # 
+  # Args:
+  #   @v: ???
+  #   @prefix: ???
+  #
+  # Returns: vector of dummy variable names
   s <- sort(unique(v))
   d <- outer(v, s, function(v, s) 1L * (v == s))
   colnames(d) <- paste0(prefix, s)
@@ -227,7 +238,14 @@ MakeDummyNames <- function(v, prefix = '') {
 }
 
 MakeDummyVariables <- function(df, cols) {
-  
+  # Make the dummy variables for CoVPN survey response data
+  # 
+  # Args:
+  #   @df: ???
+  #   @cols: ???
+  #
+  # Returns: same data frame used as input with dummy variables added as 
+  # new columns to the dataset
   for (col in cols) {
     lst <- strsplit(as.character(df[[col]]), split = "\\:")
     k <- lengths(lst)
@@ -248,9 +266,14 @@ MakeDummyVariables <- function(df, cols) {
   return(df)
 }
 
-CreateBaselineTable <- function(baseline_df, 
-                                variable){
-  
+CreateBaselineTable <- function(baseline_df, variable){
+  # Create a baseline table 1 to describe population characteristics
+  # 
+  # Args:
+  #   @baseline_df: dataframe with one row per person and variables to describe
+  #   @variable: categorical variable to stratify the baseline table results
+  #
+  # Returns: compareGroups formatted table with baseline characteristics of population
   COLUMNS <- c(variable)
   
   baseline_df <- as.data.frame(baseline_df)
@@ -340,6 +363,11 @@ responses_clean$job_risk_low <- sapply(responses_clean$occ_jobs_ids,
                                        function(x) ifelse (any(
    x==c(174,176,131,179,165,168,132,134,136,130,133,171)), 1, 0)) 
 responses_clean$job_risk_low[is.na(responses_clean$job_risk_low)] <- 0
+
+responses_clean <- responses_clean %>% 
+  mutate(job_risk_cat = if_else(job_risk_high == 1, "High",
+                                if_else(job_risk_low == 1, "Low", 
+                                        "Average")))
 
 # DERIVED FEATURE: n_work_interactions
 responses_clean$n_work_interactions <- as.numeric(mapvalues(responses_clean$ws_work_interactions_dy_id, 
@@ -570,7 +598,7 @@ responses_clean$meters <- mapply(gen_meters,
 responses_clean$meters[is.na(responses_clean$meters)] <- 0
 
 # DERIVED FEATURE: bmi
-gen_bmi <- function(x, y){
+gen_bmi <- function(x, y){000
    return(x/(y^2))
 }
 responses_clean$bmi <- mapply(gen_bmi, 
@@ -644,6 +672,20 @@ responses_clean <- responses_clean %>%
 ```{r calculate risk scores}
 
 run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
+  # Calculates the risk scores for each patient based on survey results and 
+  # risk ratios or odds ratios defined as model inputs. Can be used for main
+  # analysis with options set to NULL or options can be used to define 
+  # sensitivity analysis
+  # 
+  # Args:
+  #   @data: Dataframe with cleaned responses to the survey and all derived variables
+  #   @risk_ratio_variable: vector of character strings that are the names of the odds ratios used in the model
+  #   @risk_ratio_value: the value
+  #
+  # Returns: list of 4 data frames named exposures, clinical, score_summary, 
+  # and response_predictions where response_predictions is the same as Arg data 
+  # response_clean with scores added as new columns
+  
    if(!is.null(risk_ratio_variable) & !is.null(risk_ratio_value)) {
       if (risk_ratio_variable %in% or_cols){
          # temporarily overwrite variable
@@ -654,11 +696,19 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
       }
    }
 
+  alpha_clinical_age18 <- log(p_clinical_age18/(1- p_clinical_age18))
+  alpha_clinical_age40 <- log(p_clinical_age40/(1- p_clinical_age40))
+  alpha_clinical_age50 <- log(p_clinical_age50/(1- p_clinical_age50))
+  alpha_clinical_age60 <- log(p_clinical_age60/(1- p_clinical_age60))
+  alpha_clinical_age70 <- log(p_clinical_age70/(1- p_clinical_age70))
+  alpha_clinical_age80 <- log(p_clinical_age80/(1- p_clinical_age80))
+  
     # Define exposure score
     
-    exposures <- responses_clean %>% 
+    exposures <- data %>% 
       select(sr_guid, susceptible,
              any_work, freq_work, freq_work_increase, 
+             n_work_interactions,
              job_risk_high, job_risk_low,
              work_unsafe_distance, work_unsafe_masks,
              wfh_only, n_work_interactions,
@@ -672,24 +722,25 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
              risk_score_cover_h) %>% 
       mutate(full_home_score  = (or_risky_home^risky_home_setting) *
                  (or_caregiver^caregiver) *
-               (n_home_young*(or_school_childcare^home_schoolreturn) +
+               (n_home_young*(or_school_childcare^(home_schoolreturn + outside_childcare)) +
                (n_home_middle + n_home_older)*(or_partner_job^high_partner_risk) +
                freq_visitors),
              score_home = if_else(full_home_score >= 15, 15, full_home_score)/15,
              
-             full_score_community = (social_gathering*n_gathering*gathering_risk + 
+             full_score_community = (social_gathering*n_gathering*(or_gathering_risk^gathering_risk) + 
                                        n_social_intxn) * 
                (or_race_black^race_black) * (or_hispanic^hispanic),
              score_community = if_else(full_score_community >= 15, 15, full_score_community)/15,
              
              full_work_score = (freq_work + freq_work_increase)*
+                n_work_interactions *
                 (or_job_risk_high^job_risk_high)*
                 (or_job_risk_low^job_risk_low)*
                 (or_work_unsafe_distance^work_unsafe_distance)*
                 (or_work_unsafe_masks^work_unsafe_masks)*
                 (or_wfh^wfh_only), 
-             score_work = if_else(full_work_score >= 10, 10, 
-                                  full_work_score, missing = 0)/10,
+             score_work = if_else(full_work_score >= 20, 20, 
+                                  full_work_score, missing = 0)/20,
              
              score_transit = ifelse(travel_public_transit > 0, 1, 0),
              
@@ -710,7 +761,14 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
     
     # Define clinical symptomatic risk score
     
-    clinical <- responses_clean %>% 
+    beta_race_black <- log(or_race_black)
+    beta_hispanic <- log(or_hispanic)
+    beta_bmi_overweight <- log(or_bmi_overweight)
+    beta_bmi_obese <- log(or_bmi_obese)
+    beta_comorbidity_n <- log(or_comorbidity_n)
+    beta_cancer <- log(or_cancer)
+    
+    clinical <- data %>% 
       select(sr_guid,
              md_gender, md_age,
              age_18, age_40, age_50, age_60, age_70, age_80, 
@@ -750,7 +808,7 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
                                            levels = c("Low", "Moderate", "High")))
     
     # final analysis data frame with all cleaned responses and model predictions
-    response_predictions <- responses_clean %>% 
+    response_predictions <- data %>% 
       left_join(score_summary %>% 
                   select(-susceptible, -risk_score_cover_h), 
                 by = "sr_guid")
@@ -758,7 +816,9 @@ run_model <- function(data, risk_ratio_variable=NULL, risk_ratio_value=NULL){
    return(list(exposures, clinical, score_summary, response_predictions))
 }
 
-model_dfs <- run_model(responses_clean)
+model_dfs <- run_model(responses_clean, 
+                       risk_ratio_variable = NULL, 
+                       risk_ratio_value = NULL)
 
 exposures <- model_dfs[[1]]
 
@@ -778,6 +838,18 @@ We developed a individual person-level cumulative endpoint risk score with four 
 (home, community, work, transit), a relative risk of showing symptoms if infected, 
 and a magic vaccine trial endpoint risk score that combines susceptibility, 
 cumulative exposure, and risk of symptoms. 
+
+```{r}
+ggplot(score_summary, aes(score_endpoint)) +
+  geom_histogram(aes(fill = endpoint_score_level), alpha = .6, binwidth = 2) +
+  xlab('Endpoint Risk Score') +
+  ylab('Number of people in registry') +
+  theme_bw() +
+  scale_fill_manual(name = "Endpoint Risk", 
+                    values = c("High" = "red", "Moderate" = "orange", "Low" = "gold"))
+```
+
+##### __Figure.__ Distribution of Endpoint Risk Score
 
 ### Population Characteristics
 
@@ -863,46 +935,16 @@ ggplot(score_summary, aes(score_cumulative_exposure, p_clinical)) +
   geom_jitter(alpha = .3, aes(color = score_endpoint)) +
   xlim(0,100) +
   ylim(0,1) +
-  xlab("Transmission exposure over next 3 months") +
-  ylab("Clinical symptoms score") + 
-  geom_vline(xintercept = 50) + 
-  geom_hline(yintercept = .5) +
+  xlab("Estimated transmission exposure in next 3 months") +
+  ylab("Estimated probability of clinical symptoms if infected") + 
+  geom_vline(xintercept = 50, alpha = 0.5) + 
+  geom_hline(yintercept = .5, alpha = 0.5) +
   theme_bw() +
   scale_color_gradient(name = "Endpoint Score", 
                        low = "yellow", high = "red", na.value = NA)
 ```
 
 ##### __Figure.__ Cumulative transmission exposure score vs the probability of showing symptoms as contributors to the new endpoint risk score. 
-
-<br>
-
-```{r}
-ggplot(score_summary, aes(score_endpoint)) +
-  geom_histogram(aes(fill = endpoint_score_level), alpha = .6, binwidth = 2) +
-  xlab('Endpoint Risk Score') +
-  ylab('Number of people in registry') +
-  theme_bw() 
-```
-
-##### __Figure.__ Distribution of Endpoint Risk Score
-
-<br>
-
-```{r}
-ggplot(score_summary, aes(score_endpoint, risk_score_cover_h)) +
-  geom_jitter(alpha = .3, aes(color = score_community)) +
-  xlim(0,100) +
-  ylim(0,100) +
-  xlab("New proposed endpoint risk score") +
-  ylab("Cover Score for Hospitalization") + 
-  geom_vline(xintercept = 50) + geom_hline(yintercept = 50) +
-  theme_bw() +
-  scale_color_gradient(name = "Community exposure", 
-                       low = "yellow", high = "red", na.value = NA)
-  
-```
-
-##### __Figure.__ New endpoint risk score vs Cover score for hospitalizations
 
 <br>
 
@@ -942,7 +984,7 @@ score_summary_long <- gather(data = score_summary, key = score, value = value,
 ggplot(score_summary_long %>% 
          filter(score == "score_home" | score == "score_community" |
                   score == "score_work" | score == "score_transit"), aes(value, fill = score)) +
-  geom_histogram(alpha = .7, binwidth = .1) +
+  geom_histogram(alpha = .9, binwidth = .1) +
   facet_wrap(~score) +
   xlab('Score') +
   ylab('Number of people in registry') +
@@ -966,31 +1008,104 @@ in the [analysis plan here](https://docs.google.com/document/d/1U6jhMBk66-rlcWUP
 ```{r}
 ggplot(score_summary, aes(score_cumulative_exposure)) +
   geom_histogram(fill = "black", alpha = .6, binwidth = 5) +
-  xlab('Cumulative exposure score') +
+  xlab('Estimated cumulative transmission exposure score') +
   ylab('Number of people in registry') +
   theme_bw()
 ```
 
 ##### __Figure.__ Distribution of cumulative exposure score
 
-
 <br>
 
 ```{r}
-ggplot(score_summary, aes(score_cumulative_exposure, risk_score_cover_h)) +
-  geom_jitter(alpha = .3, aes(color = score_community), size = 1.5) +
-  xlim(0,100) +
-  ylim(0,100) +
-  xlab("Cumulative Exposure Score") +
-  ylab("Cover Score for Hospitalization") + 
-  geom_vline(xintercept = 50) + geom_hline(yintercept = 50) +
+ggplot(response_predictions, aes(md_age, score_cumulative_exposure)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlim(20, 85) +
+  xlab("Age") +
+  ylab("Estimated Transmission Exposure Score") + 
+  geom_smooth(method = "lm", size = 2, se = TRUE) +
   theme_bw() +
-  scale_color_gradient(name = "Community exposure probability", 
+  scale_color_gradient(name = "Endpoint Risk Score", 
                        low = "yellow", high = "red", na.value = NA)
   
 ```
 
-##### __Figure.__ New cumulative exposure score vs Cover score H
+##### __Figure.__ Assocation between age and estimated transmission exposure
+
+<br>
+
+```{r}
+ggplot(response_predictions, aes(freq_work, score_cumulative_exposure)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlab("Frequency of Work (days per week in person)") +
+  ylab("Estimated Transmission Exposure") + 
+  theme_bw() +
+  geom_smooth(method = "lm", size = 1.5, se = TRUE, aes(linetype = factor(job_risk_cat))) +
+  scale_color_gradient(name = "Endpoint Risk Score", 
+                       low = "yellow", high = "red", na.value = NA) + 
+  scale_linetype(name = "Job Risk")
+  
+```
+
+##### __Figure.__ Assocation between job function risk and estimated transmission exposure
+
+<br>
+
+```{r}
+ggplot(response_predictions, aes(n_gathering, score_cumulative_exposure)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlab("Largest Gathering Size in Past 2 Weeks") +
+  ylab("Estimated Transmission Exposure") +
+  geom_smooth(method = "lm", size = 1.5, se = TRUE, aes(linetype = factor(n_social_intxn))) +
+  theme_bw() +
+  scale_color_gradient(name = "Endpoint Risk Score", 
+                       low = "yellow", high = "red", na.value = NA) +
+    scale_linetype(name = "Average social interactions (number per day")
+```
+
+##### __Figure.__ Age and estimated transmission exposure, stratified by 
+
+<br>
+
+
+```{r}
+ggplot(response_predictions, aes(n_home_total, score_cumulative_exposure)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlab("Number of people in household") +
+  ylab("Estimated Transmission Exposure") + 
+  ylim(0, 100) +
+  geom_smooth(method = "lm", size = 1.5, se = TRUE, aes(linetype = factor(risky_home_setting))) +
+  theme_bw() +
+  scale_color_gradient(name = "Endpoint Risk Score", 
+                       low = "yellow", high = "red", na.value = NA) + 
+  scale_linetype(name = "High Risk Setting")
+  
+```
+
+##### __Figure.__ Assocation between number of people living in household and estimated transmission exposure
+
+<br>
+
+#### Exposure compared to risk of hospitalization if infected
+
+```{r}
+ggplot(score_summary, aes(risk_score_cover_h, score_cumulative_exposure,)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  ylim(0,100) +
+  xlab("Cover Score for Hospitalization") +
+  ylab("Estimated transmission exposure risk") + 
+  geom_vline(xintercept = 50, alpha = .5) + 
+  geom_hline(yintercept = 50, alpha = .5) +
+  geom_smooth(method = "lm", size = 2.5, se = TRUE) +
+  theme_bw() +
+  scale_color_gradient(name = "Endpoint risk score", 
+                       low = "yellow", high = "red", na.value = NA)
+  
+```
+
+##### __Figure.__ Endpoint risk score vs Cover score for hospitalization if infected
+
+<br>
 
 <br>
 
@@ -1026,8 +1141,16 @@ ggplot(score_summary, aes(p_clinical)) +
 
 ##### __Figure.__ Distribution of probability of showing clinical symptoms if infected
 
+<br>
+
+We transform the probability of clinical symptoms if infected by exponentiating
+to the power of `r w_clinical` to attenuate the contribution of clinical symptoms
+on the final Endpoint Risk Score in its contribution with the estimated 
+transmission risk score. Below is a figure showing the distribution of the 
+transformed clnical symptoms that is multiplied by the tranmission risk score. 
+
 ```{r}
-ggplot(score_summary, aes((p_clinical^.2))) +
+ggplot(score_summary, aes((p_clinical^w_clinical))) +
   geom_histogram(fill = "black", alpha = .6, binwidth = .05) +
   xlab('Probability of clinical symptoms if infected') +
   ylab('Number of people in registry') +
@@ -1035,7 +1158,32 @@ ggplot(score_summary, aes((p_clinical^.2))) +
   theme_bw()
 ```
 
-##### __Figure.__ Distribution of log scale clinical risk score if infected
+##### __Figure.__ Distribution of clinical symptom risk score transformed for interaction with exposure to generate Endpoint Risk Score
+
+<br>
+
+To assess the face validity of our estiamted probability of developing 
+clinical symptoms, we expect people of older age and people who are obese 
+to be more likely to show symptoms than younger people and people who are not 
+obese. 
+
+```{r}
+ggplot(response_predictions, aes(md_age, p_clinical)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlim(20,85) +
+  xlab("Age") +
+  ylab("Probability of Symptoms if Infected") + 
+  geom_smooth(method = "lm", size = 1.5, se = TRUE, aes(linetype = factor(bmi_obese))) +
+  theme_bw() +
+  scale_color_gradient(name = "Endpoint Risk Score", 
+                       low = "yellow", high = "red", na.value = NA) + 
+  scale_linetype(name = "Obese")
+  
+```
+
+##### __Figure.__ Age, obesity, and the estimated probability of developing clinical symptoms if infected
+
+<br>
 
 
 Below the new cliniccal risk 
@@ -1043,22 +1191,39 @@ score is compared to
 the Cover score H representing risk of hospitalization if infected. 
 
 ```{r}
-ggplot(clinical, aes(risk_score_cover_h, p_clinical)) +
-  geom_jitter(alpha = .3, aes(color = comorbidity_n)) +
-  xlim(0,100) +
-  ylim(0,1) +
-  xlab("Cover Score for Hospitalization if Infected") +
-  ylab("*NEW* Probability of Clinical Symptoms if Infected") + 
-  geom_vline(xintercept = 50) + geom_hline(yintercept = 0.5) +
+ggplot(response_predictions, aes(comorbidity_n, p_clinical)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlim(0, 5) +
+  xlab("Number of comorbidities") +
+  ylab("Probability of clinical symptoms if infected") + 
+  geom_smooth(method = "lm", size = 2, se = TRUE, aes(linetype = age_over65)) +
   theme_bw() +
-  scale_color_gradient(name = "Comorbidities", 
+  scale_color_gradient(name = "Endpoint Risk Score", 
                        low = "yellow", high = "red", na.value = NA)
   
 ```
 
-##### __Figure.__ New score for risk of showing mild-moderate symptoms if infected ("clinical risk score") vs Cover score H
+##### __Figure.__ Assocation between comorbidities and probability of clinical symptoms if infected, by age >= or < 65 years
 
 <br>
+
+```{r}
+ggplot(response_predictions, aes(md_age, p_clinical)) +
+  geom_jitter(alpha = .3, aes(color = score_endpoint)) +
+  xlim(20, 85) +
+  xlab("Age") +
+  ylab("Probability of clinical symptoms if infected") + 
+  geom_smooth(method = "lm", size = 2, se = TRUE) +
+  theme_bw() +
+  scale_color_gradient(name = "Endpoint Risk Score", 
+                       low = "yellow", high = "red", na.value = NA)
+  
+```
+
+##### __Figure.__ Assocation between age and probability of clinical symptoms if infected
+
+<br>
+
 
 ### Age and Endpoint Risk Score
 
@@ -1074,48 +1239,20 @@ The color scale for work represents the average number of days per week that the
 We are particularly interested in the emphasis on the older age group 
 e.g. > 65 who are being targeted.
 
-```{r}
-ggplot(response_predictions, aes(md_age, score_endpoint)) + 
-  geom_smooth(method = "lm", size = 2, se = TRUE) +
-  xlab("Age") +
-  ylab("Endpoint Risk Score") +
-  xlim(20, 85) +
-  ylim(0, 100) +
-  theme_bw()
-```
-
-##### __Figure.__ Linear association between the endpoint risk score and age
-
-<br>
-
-```{r}
-ggplot(response_predictions, aes(md_age, score_endpoint)) +
-  geom_jitter(alpha = .3, aes(color = freq_work)) +
-  xlab("Age") +
-  xlim(15, 85)+
-  ylab("Endpoint Risk Score") +
-  theme_bw() +
-  scale_color_gradient(name = "Work days/wk", 
-                       low = "blue", high = "yellow", na.value = NA)
-```
-
-##### __Figure.__ Age vs endpoint risk score, colored by work days per week 
-
-<br>
-
-```{r}
-ggplot(response_predictions, aes(age_over65, score_endpoint)) +
-  geom_boxplot() +
-  xlab("Age") +
-  ylab("Endpoint Risk Score") +
-  theme_bw()
-```
-
-
 <br>
 
 ### Sensitivity Analysis 
 
+In this section we conduct a one-way sensitivity analysis to understand the 
+influence of the input values assumed for risk ratios. These assumptions 
+were based on peer-reviewed literature, evidence synthesis, and expert opinions 
+that were available at the time of analysis. 
+There is great uncertainty about the association of risk factors at home, 
+work, in the community, and transportation in relation to the likelihood of becoming
+infected and developing symptomatic covid disease. In this one-way sensitivity 
+analysis, we re-run the calculuations at the upper and lower ranges of uncertainty 
+for each model input to understand the influence of uncertainty on the mean
+Endpoint Risk Score. 
 
 ```{r sensitivity analysis}
 
@@ -1164,23 +1301,6 @@ gen_df_for_plotting <- function(dict, plot_df, risk_scores_df){
 
 # Generate risk scores and plot data for tornado diagram 
 
-# dictionary of lower, upper, and current values for each OR variable
-or_dict <- data.frame(variable_name=or_cols, 
-                      lower_bound=c(1.0, 1.0, 1.0, 
-                                    1.0, 0.01, 0.01, 
-                                    1.0, 1.0, 
-                                    0.3, 0.3, 0.3, 0.3, 
-                                    0.3, 0.3, 1.0, 1.0, 
-                                    1.0, 1.0, 1.0, 
-                                    1.0, 1.0),
-                      upper_bound=c(5.0, 5.0, 5.0, 
-                                    5.0, 1.0, 1.0, 
-                                    5.0, 5.0, 
-                                    1.0, 1.0, 1.0, 1.0,
-                                    1.0, 1.0, 10.0, 10.0,
-                                    5.0, 5.0, 3.0,
-                                    5.0, 5.0),
-                      stringsAsFactors = FALSE)
 
 # create dataframe to patient-level risk scores for different OR values
 td_raw_data <- data.frame(responses_clean$sr_guid)
@@ -1224,7 +1344,7 @@ td_plot_2 <- td_plot_2 %>%
    dplyr::left_join(or_dict %>% 
                        select(variable_name, lower_bound, upper_bound), by = "variable_name") 
 
-figure_tornado_sensitivity <- ggplot() + 
+ggplot() + 
    geom_rect(data = td_plot_2, 
              aes(ymax=ymax, ymin=ymin, xmax=xmax, xmin=xmin, fill=type)) +
    geom_text(data = td_plot_2[td_plot_2$type == "lower_bound",], 
@@ -1237,13 +1357,31 @@ figure_tornado_sensitivity <- ggplot() +
    geom_hline(yintercept = current_model_mean) +
    scale_x_continuous(breaks = c(1:length(risk_ratio_variable_levels)), 
                       labels = risk_ratio_variable_levels) +
-   labs( title= "One way sensitivity analysis", y="Score endpoint") +
+   labs( title= "One way sensitivity analysis", y="Mean Endpoint Risk Score") +
    coord_flip()
+```
 
+##### __Figure.__ Tornado diagram of one-way sensitivity analysis examining the impact of upper and lower ranges for inputs values
 
+<br>
+
+#### Marginal effects
+
+In this section we evaluate the potential influence of specific survery question
+responses on the final Endpoint Risk Score. We do this by estimating the 
+marginal effects of survey response inputs. For each survey response item that 
+is used to inform the Endpoint Risk Score, we re-run 
+the calculations as if everyone in the population had given the minimum value of response 
+and then re-run it again as if everyone had responded with the max value. 
+We then calculate the marginal effect of a response item by comparing the 
+difference between the mean Endpoint Risk Score at the minimum value to the mean 
+Endpoint Risk score at the maximum value. The responses with the largest incremental 
+change in Endpoint Risk Score are the biggest drivers of the likelihood o
+becomeing infected and showing clinical symtoms in the following three months. 
+
+```{r marginal effects}
 # Generate risk scores and plot data for marginal effects plot
-model_variables_dict <- data.frame(variable_name = c("any_work",
-                           "freq_work",
+model_variables_dict <- data.frame(variable_name = c("freq_work",
                            "freq_work_increase", 
                            "job_risk_high",
                            "job_risk_low",
@@ -1264,9 +1402,7 @@ model_variables_dict <- data.frame(variable_name = c("any_work",
                            "n_social_intxn",
                            "n_gathering",
                            "gathering_risk",
-                           "travel_bus",
-                           "travel_train",
-                           "travel_plane",
+                           "travel_public_transit",
                            "race_black",
                            "hispanic",
                            "age_18",
@@ -1301,28 +1437,22 @@ me_plot <- gen_df_for_plotting(model_variables_dict, me_plot, me_risk_scores)
 me_plot$diff <- me_plot$upper_bound - me_plot$lower_bound
 me_plot$absdiff <- abs(me_plot$diff)
 
-ggplot(data=me_plot, aes(x=reorder(variable_name, absdiff), y=diff)) +
-   geom_bar(stat="identity") +  coord_flip()
+figure_marginal_effects <- ggplot(data=me_plot, aes(x = reorder(variable_name, absdiff), 
+                                                    y = diff)) +
+  geom_bar(stat="identity") +  
+  coord_flip() +
+  xlab("Survey Response") + 
+  ylab("Marginal Effect (difference in mean score)") + 
+  theme_bw()
 
 ```
 
 
 ```{r}
-figure_tornado_sensitivity
+figure_marginal_effects
 ```
 
-
-##### __Figure.__ Tornado diagram of one-way sensitivity analysis examining the impact of upper and lower ranges for inputs values
-
-<br>
-
-#### Marginal effects
-
-```{r}
-fig_marginal_effects
-```
-
-##### __Figure.__ Marginal effects of each variable on the 
+##### __Figure.__ Marginal effects of survey response variable min and max on the mean Endpoint Risk Score
 
 
 # Discussion
