@@ -186,17 +186,18 @@ Other member of household has risky job compared to average job | `r or_partner_
 Working in high risk job compared to average job risk | `r or_job_risk_high`| Expert opinion 
 Working in lower risk job compared to average job risk | `r or_job_risk_low`| Expert opinion 
 Working only from home | `r or_wfh`| Expert opinion 
+Risky indoor gathering | `r or_gathering_risk`| Expert opinion 
 
 <br>
 
-Variables in clinical symptoms model | Risk Ratio | Reference
+Variables in clinical symptoms model | Value | Reference
 ----------------------|------------|----------------
-Age 18-<40 | `r or_age18` | Davies et al
-Age 40-<50 | `r or_age40` | Davies et al
-Age 50-<60 | 1.0 (Ref) | Davies et al
-Age 60-<70 | `r or_age60` | Davies et al
-Age 70-<80 | `r or_age70` | Davies et al
-Age 80+ | `r or_age80` | Davies et al
+Probability of symptoms if infected, age 18-<40 | `r p_clinical_age18` | Davies et al
+Probability of symptoms if infected, age 40-<50 | `r p_clinical_age40` | Davies et al
+Probability of symptoms if infected, age 50-<60 | `r p_clinical_age50` | Davies et al
+Probability of symptoms if infected, age 60-<70 | `r p_clinical_age60` | Davies et al
+Probability of symptoms if infected, age 70-<80 | `r p_clinical_age70` | Davies et al
+Probability of symptoms if infected, age 80+ | `r p_clinical_age80` | Davies et al
 Black race | `r or_race_black`  | Expert opinion
 Hispanic or LatinX | `r or_hispanic`| Expert opinion
 BMI overweight | `r or_bmi_overweight`| Expert opinion
