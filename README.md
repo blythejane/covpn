@@ -13,3 +13,5 @@ to evaluate vaccine efficacy.
 The main data source used to inform this analysis is the CoVPN Vaccine Trial Screening Registry 
 powered by Oracle APEX. The online survey is available here 
 https://coronaviruspreventionnetwork.org/clinical-study-volunteer/.
+
+Start by running the analysis of the CoVPN registry located in the file covpn_registry_analysis.R. 
