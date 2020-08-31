@@ -4,7 +4,6 @@ SELECT
   , score_home AS score_home
   , score_work AS score_work
   , score_community AS score_community
-  , score_transit AS score_transit
   , score_cumulative_exposure AS score_cumulative_exposure
   , risk_score_cover_h AS risk_score_cover_h
   , p_clinical AS p_clinical
@@ -12,8 +11,8 @@ SELECT
   , score_endpoint AS score_endpoint
   , CASE 
       WHEN score_endpoint IS NULL THEN 'Low'
-      WHEN score_endpoint>=36 THEN 'High'
-      WHEN (score_endpoint>=19 AND score_endpoint<36) THEN 'Moderate'
+      WHEN score_endpoint>=40 THEN 'High'
+      WHEN (score_endpoint>=19 AND score_endpoint<40) THEN 'Moderate'
       ELSE 'Low'
     END AS endpoint_score_level
 FROM (
@@ -23,7 +22,6 @@ FROM (
     , score_home AS score_home
     , score_work AS score_work
     , score_community AS score_community
-    , score_transit AS score_transit
     , score_cumulative_exposure AS score_cumulative_exposure
     , risk_score_cover_h AS risk_score_cover_h
     , p_clinical AS p_clinical
@@ -38,11 +36,9 @@ FROM (
       , score_home AS score_home 
       , score_work AS score_work
       , score_community AS score_community
-      , score_transit AS score_transit
-      , ROUND((0.2*score_home
-              +0.3*score_work
-              +0.4*score_community
-              +0.1*score_transit)*100
+      , ROUND((0.3*score_home
+              +0.4*score_work
+              +0.3*score_community)*100
               , 0) AS score_cumulative_exposure
       , risk_score_cover_h AS risk_score_cover_h
       , p_clinical AS p_clinical
@@ -61,16 +57,11 @@ FROM (
             WHEN full_work_score>=20 THEN 20
             ELSE full_work_score
            END)/20 AS score_work
-        , (CASE 
-            WHEN full_score_community>=15
-            THEN 15
-            ELSE full_score_community
-          END)/15 AS score_community
         , CASE 
-            WHEN travel_public_transit>0
+            WHEN full_score_community>1
             THEN 1
-            ELSE 0
-          END AS score_transit
+            ELSE full_score_community
+          END AS score_community
         , risk_score_cover_h AS risk_score_cover_h
         , (EXP(logistic) / (1+EXP(logistic))) AS p_clinical
         , (100-md_age) AS score_control
@@ -85,17 +76,19 @@ FROM (
            *(n_home_young*POWER(3.0,(home_schoolreturn+outside_childcare)) 
               +(n_home_middle+n_home_older)*POWER(1.5,high_partner_risk) 
               +freq_visitors)) AS full_home_score
-          , ((social_gathering*n_gathering*POWER(3.0,gathering_risk)+n_social_intxn) 
-             *POWER(5.0,race_black) 
-             *POWER(5.0,hispanic)) AS full_score_community
+          , ((social_intxn_bw_1to10*0.25
+             +gathering_bw_10to20*0.5*POWER(indoor_gathering,1.5)
+             +social_intxn_over10*0.9
+             +gathering_over20*0.9*POWER(indoor_gathering,1.5)
+             +freq_visitors*0.2)
+            *POWER(5.0,race_black)*POWER(5.0,hispanic)) AS full_score_community
           , ((freq_work+freq_work_increase)
-             *n_work_interactions
+             *(n_work_interactions+travel_public_transit)
              *POWER(2.0,job_risk_high)
              *POWER(0.5,job_risk_low)
              *POWER(2.0,work_unsafe_distance)
              *POWER(2.0,work_unsafe_masks)
-             *POWER(0.01,wfh_only)) AS full_work_score
-          , travel_public_transit AS travel_public_transit
+             *POWER(0.1,wfh_only)) AS full_work_score
           , (LN((0.33/(1-0.33)))*age_18
              +LN((0.40/(1-0.40)))*age_40
              +LN((0.49/(1-0.49)))*age_50
@@ -235,7 +228,7 @@ FROM (
                 END AS home_schoolreturn
               , CASE
                   WHEN LS_COHAB_IN_SCH_OR_CC IS NULL THEN 0
-                  WHEN LS_COHAB_IN_SCH_OR_CC>8 THEN 8
+                  WHEN LS_COHAB_IN_SCH_OR_CC>3 THEN 3
                   ELSE LS_COHAB_IN_SCH_OR_CC
                 END AS outside_childcare
               , CASE
@@ -280,6 +273,31 @@ FROM (
                   WHEN CI_GATHERINGS_LOCATION_ID IN (347, 601) THEN 1 
                   ELSE 0.25
                 END AS gathering_risk
+              , CASE 
+                  WHEN CI_INTERACTIONS_DY_ID=589 THEN 1 
+                  ELSE 0
+                END AS social_intxn_bw_1to10
+              , CASE 
+                  WHEN CI_INTERACTIONS_DY_ID IN (590, 591, 592) THEN 1 
+                  ELSE 0
+                END AS social_intxn_over10
+              , CASE 
+                  WHEN CI_GATHERINGS_PEOPLE_ID=343 THEN 1 
+                  ELSE 0
+                END AS gathering_bw_10to20
+              , CASE 
+                  WHEN CI_GATHERINGS_PEOPLE_ID IN (344, 345, 346) THEN 1 
+                  ELSE 0
+                END AS gathering_over20
+              , CASE 
+                  WHEN CI_INTERACTIONS_DY_ID IN (590, 591, 592) THEN 1
+                  WHEN CI_GATHERINGS_PEOPLE_ID IN (344, 345, 346) THEN 1 
+                  ELSE 0
+                END AS social_risk_high
+              , CASE 
+                  WHEN CI_GATHERINGS_LOCATION_ID IN (347, 601) THEN 1
+                  ELSE 0
+                END AS indoor_gathering
               , CASE 
                   WHEN INSTR(':' || WS_WORK_TRANSPORTATION_IDS || ':',':287:')>0 THEN 1 
                   WHEN INSTR(':' || WS_WORK_TRANSPORTATION_IDS || ':',':288:')>0 THEN 1 
