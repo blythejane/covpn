@@ -1,3 +1,5 @@
+# source from covpn_registry_analysis.Rmd
+# insert ORE SQL query string
 
 ore.connect("", host="", 
             password="", 
